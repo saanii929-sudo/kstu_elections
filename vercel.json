@@ -1,0 +1,9 @@
+{
+  "buildCommand": "pnpm install --no-frozen-lockfile && pnpm run build",
+  "crons": [
+    {
+      "path": "/api/cron/stage-scheduler",
+      "schedule": "* * * * *"
+    }
+  ]
+}
