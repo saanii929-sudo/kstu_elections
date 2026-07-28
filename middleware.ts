@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export function middleware(request: NextRequest) {
+  // The voter login page is link-only: it must be reached via the secure,
+  // per-voter link (?<linkHash>) sent by SMS/email. A bare visit with no
+  // query string has no way to identify a voter, so send it to the
+  // no-access page rather than rendering an empty/broken login form.
+  if (request.nextUrl.pathname === '/election/login' && !request.nextUrl.search) {
+    return NextResponse.redirect(new URL('/election/no-access', request.url));
+  }
+
   const response = NextResponse.next();
 
   // Security headers

@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Voter from '@/models/Voter';
-import Election from '@/models/Election';
 import { verifyPassword } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
+import { checkVoterEligibility } from '@/lib/voterEligibility';
 
+// Actual login: requires the voter's student number + password, entered
+// manually. Reaching this form at all requires the secure per-voter link
+// first (see /api/elections/auth/verify-link) — the link is a gate, not a
+// credential, but since student numbers are only unique per election (not
+// globally), the link's hash is what scopes this lookup to the one voter it
+// was issued to.
 export async function POST(req: NextRequest) {
   try {
-    // Rate limit: 10 login attempts per IP per 15 minutes
     const ip = getClientIp(req.headers);
     const rl = checkRateLimit(`election-login:${ip}`, 10, 15 * 60 * 1000);
     if (!rl.allowed) {
@@ -20,85 +25,42 @@ export async function POST(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
-    const { token, password } = body;
+    const { linkHash, studentId, password } = body;
 
-    if (!token || !password) {
+    if (!linkHash || !studentId || !password) {
       return NextResponse.json(
-        { error: 'Token and password are required' },
+        { error: 'Student number and password are required' },
         { status: 400 }
       );
     }
-    const voter = await Voter.findOne({ token: token.toUpperCase() });
 
-    if (!voter) {
-      return NextResponse.json(
-        { error: 'Invalid token or password' },
-        { status: 401 }
-      );
-    }
-
-    if (voter.status !== 'active') {
-      if (voter.status === 'expired') {
-        return NextResponse.json(
-          { error: 'Your voting credentials have expired. You have already voted.' },
-          { status: 403 }
-        );
-      }
-      return NextResponse.json(
-        { error: 'Your voting access has been disabled' },
-        { status: 403 }
-      );
+    const voter = await Voter.findOne({ linkHash: String(linkHash) });
+    if (!voter || voter.voterId?.trim().toLowerCase() !== String(studentId).trim().toLowerCase()) {
+      return NextResponse.json({ error: 'Invalid student number or password' }, { status: 401 });
     }
 
     const isValidPassword = await verifyPassword(password, voter.password);
-
     if (!isValidPassword) {
-      return NextResponse.json(
-        { error: 'Invalid token or password' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Invalid student number or password' }, { status: 401 });
     }
-    const election = await Election.findById(voter.electionId);
 
-    if (!election) {
+    const eligibility = await checkVoterEligibility(voter);
+    if (!eligibility.ok) {
       return NextResponse.json(
-        { error: 'Election not found' },
-        { status: 404 }
+        { error: eligibility.error, startDate: eligibility.startDate },
+        { status: eligibility.status }
       );
     }
+    const election = eligibility.election!;
+
     const now = new Date();
-    const startDate = new Date(election.startDate);
-    const endDate = new Date(election.endDate);
-
-    // Reject login before election starts
-    if (now < startDate) {
-      return NextResponse.json(
-        {
-          error: 'Voting has not started yet. Please wait until the election begins.',
-          startDate: election.startDate,
-        },
-        { status: 403 }
-      );
-    }
-
-    // Reject login after election period ends — token has expired
-    if (election.status === 'ended' || now > endDate) {
-      // Mark voter as expired so future attempts also fail fast
-      if (voter.status === 'active') {
-        await Voter.findByIdAndUpdate(voter._id, { status: 'expired' });
-      }
-      return NextResponse.json(
-        { error: 'This election has ended. Your voting credentials are no longer valid.' },
-        { status: 403 }
-      );
-    }
-
     let electionStatus = 'upcoming';
-    if (now >= startDate && now <= endDate) {
+    if (now >= election.startDate && now <= election.endDate) {
       electionStatus = 'active';
-    } else if (now > endDate) {
+    } else if (now > election.endDate) {
       electionStatus = 'ended';
     }
+
     const voterData = {
       id: voter._id,
       name: voter.name,

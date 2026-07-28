@@ -12,6 +12,9 @@ import ConfirmModal from "@/components/ConfirmModal";
 interface Election {
   _id: string;
   title: string;
+  settings?: {
+    requireAgentSignature?: boolean;
+  };
 }
 
 interface Candidate {
@@ -348,9 +351,12 @@ export default function AgentsPage() {
       const res = await authFetch("/api/elections");
       if (res.ok) {
         const data = await res.json();
-        const list: Election[] = data.data || [];
+        const all: Election[] = data.data || [];
+        // Only elections with "Require Agent Signature" enabled can have agents assigned.
+        const list = all.filter((e) => e.settings?.requireAgentSignature);
         setElections(list);
         if (list.length > 0) setSelectedElection(list[0]._id);
+        else setSelectedElection("");
       }
     } catch { /* silent */ }
   }, []);
@@ -417,13 +423,20 @@ export default function AgentsPage() {
         <select
           value={selectedElection}
           onChange={(e) => setSelectedElection(e.target.value)}
-          className="w-full max-w-sm border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#d4af37] bg-white"
+          disabled={elections.length === 0}
+          className="w-full max-w-sm border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#d4af37] bg-white disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {elections.length === 0 && <option value="">No elections found</option>}
+          {elections.length === 0 && <option value="">No eligible elections</option>}
           {elections.map((e) => (
             <option key={e._id} value={e._id}>{e.title}</option>
           ))}
         </select>
+        {elections.length === 0 && (
+          <p className="text-xs text-gray-400 mt-2">
+            No elections have &quot;Require Agent Signature&quot; enabled. Turn it on in an election&apos;s
+            settings to assign polling agents to it.
+          </p>
+        )}
       </div>
 
       {/* Agents list */}

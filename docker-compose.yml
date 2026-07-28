@@ -1,0 +1,34 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      # Overrides whatever MONGODB_URI is set to in .env — inside this
+      # compose network the database is reachable at the service name
+      # "mongo", not localhost. Point elsewhere (e.g. MongoDB Atlas) by
+      # deleting this line and setting MONGODB_URI in .env instead.
+      MONGODB_URI: mongodb://mongo:27017/pawavotes
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

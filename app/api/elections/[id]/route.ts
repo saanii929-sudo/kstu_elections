@@ -7,6 +7,7 @@ import ElectionCategory from '@/models/ElectionCategory';
 import ElectionVote from '@/models/ElectionVote';
 import PinkSheet from '@/models/PinkSheet';
 import { verifyToken } from '@/lib/auth';
+import { normalizeAlias, isValidAlias } from '@/lib/electionStatus';
 
 export async function PUT(
   req: NextRequest,
@@ -27,7 +28,7 @@ export async function PUT(
 
     const { id } = await params;
     const body = await req.json();
-    const { title, description, startDate, endDate, settings, status } = body;
+    const { title, alias, description, startDate, endDate, settings, status } = body;
     const election = await Election.findOne({
       _id: id,
       organizationId: decoded.id,
@@ -39,6 +40,28 @@ export async function PUT(
         { status: 404 }
       );
     }
+
+    let normalizedAlias: string | undefined;
+    if (alias !== undefined) {
+      normalizedAlias = normalizeAlias(alias);
+      if (!isValidAlias(normalizedAlias)) {
+        return NextResponse.json(
+          { error: 'Alias must be 2-20 characters: letters, numbers, and hyphens only' },
+          { status: 400 }
+        );
+      }
+      const existingAlias = await Election.findOne({
+        alias: normalizedAlias,
+        _id: { $ne: id },
+      });
+      if (existingAlias) {
+        return NextResponse.json(
+          { error: 'That alias is already in use. Choose a different one.' },
+          { status: 409 }
+        );
+      }
+    }
+
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
@@ -53,6 +76,7 @@ export async function PUT(
 
     const updateData: any = {};
     if (title) updateData.title = title;
+    if (normalizedAlias !== undefined) updateData.alias = normalizedAlias;
     if (description !== undefined) updateData.description = description;
     if (startDate) updateData.startDate = new Date(startDate);
     if (endDate) updateData.endDate = new Date(endDate);
@@ -72,6 +96,12 @@ export async function PUT(
     });
   } catch (error: any) {
     console.error('Update election error:', error);
+    if (error?.code === 11000) {
+      return NextResponse.json(
+        { error: 'That alias is already in use. Choose a different one.' },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to update election', details: process.env.NODE_ENV === 'development' ? error.message : undefined },
       { status: 500 }

@@ -6,6 +6,7 @@ import { verifyToken } from '@/lib/auth';
 import { hashPassword } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { sendVoterCredentialsSms } from '@/services/sms.service';
+import { generateVoterLinkHash, buildVoterLoginUrl } from '@/lib/voterLink';
 
 function scientificToDecimal(num: string): string {
   const numStr = String(num).trim();
@@ -160,6 +161,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!voterId || !String(voterId).trim()) {
+      return NextResponse.json(
+        { error: 'Student number is required' },
+        { status: 400 }
+      );
+    }
+
     const election = await Election.findOne({
       _id: electionId,
       organizationId: decoded.id,
@@ -198,6 +206,7 @@ export async function POST(req: NextRequest) {
     const voterToken = await generateUniqueToken();
     const password = generatePassword();
     const hashedPassword = await hashPassword(password);
+    const linkHash = generateVoterLinkHash(voterToken, hashedPassword);
     const voter = await Voter.create({
       electionId,
       organizationId: decoded.id,
@@ -207,27 +216,34 @@ export async function POST(req: NextRequest) {
       voterId,
       token: voterToken,
       password: hashedPassword,
+      linkHash,
+      linkExpiresAt: election.endDate,
       metadata: metadata || {},
       status: 'active',
       hasVoted: false,
     });
 
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+    const secureLink = buildVoterLoginUrl(baseUrl, linkHash);
+
     if (email && (deliveryMethod === 'email' || deliveryMethod === 'both')) {
       try {
-        await sendVoterCredentials(email, name, voterToken, password, election.title, election.startDate, election.endDate);
+        await sendVoterCredentials(email, name, voter.voterId!, password, election.title, election.startDate, election.endDate, secureLink);
       } catch (emailError) {
       }
     }
 
     if (phoneNumber && (deliveryMethod === 'sms' || deliveryMethod === 'both')) {
       try {
-        await sendVoterCredentialsSms(phoneNumber, name, voterToken, password, election.title, election.startDate, election.endDate);
+        await sendVoterCredentialsSms(phoneNumber, name, voter.voterId!, password, election.title, election.startDate, election.endDate, secureLink, election.alias);
       } catch (smsError) {
       }
     }
 
     const voterData: any = voter.toObject();
-    delete voterData.password;
+    // Returned once so the admin can see it — the stored hash is replaced
+    // with the plaintext here, never persisted anywhere in plaintext.
+    voterData.password = password;
 
     return NextResponse.json({
       success: true,
@@ -248,6 +264,11 @@ export async function POST(req: NextRequest) {
           { error: 'This phone number is already registered for this election' },
           { status: 400 }
         );
+      } else if (keyFields.includes('voterId')) {
+        return NextResponse.json(
+          { error: 'This student number is already registered for this election' },
+          { status: 400 }
+        );
       } else if (keyFields.includes('token')) {
         return NextResponse.json(
           { error: 'Token conflict. Please try again.' },
@@ -266,14 +287,14 @@ export async function POST(req: NextRequest) {
 async function sendVoterCredentials(
   email: string,
   name: string,
-  token: string,
+  studentId: string,
   password: string,
   electionTitle: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  secureLink: string
 ): Promise<boolean> {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-  const loginUrl = `${baseUrl}/election/login`;
+  const loginUrl = secureLink;
 
   const formatDate = (date: Date) => {
     return new Date(date).toLocaleString('en-GB', {
@@ -314,12 +335,12 @@ async function sendVoterCredentials(
     <body>
       <div class="container">
         <div class="header">
-          <h1>🗳️ Your Voting Credentials</h1>
+          <h1>🗳️ You&#39;re Invited to Vote</h1>
         </div>
         <div class="content">
           <h2>Hello ${name},</h2>
           <p>You have been registered as a voter for <strong>${electionTitle}</strong>.</p>
-          
+
           <div class="date-box">
             <p style="margin: 0; font-size: 14px;"><strong>📅 Election Period:</strong></p>
             <p style="margin: 5px 0 0 0; font-size: 14px;">
@@ -327,46 +348,38 @@ async function sendVoterCredentials(
               <strong>End:</strong> ${endDateFormatted}
             </p>
           </div>
-          
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${loginUrl}" class="button" style="color: white;">
+              🗳️ Start Voting
+            </a>
+          </div>
+
+          <div class="info-box">
+            <strong>📍 Your Secure Voting Link:</strong><br>
+            <a href="${loginUrl}" style="color: #6366f1; word-break: break-all;">${loginUrl}</a>
+          </div>
+
           <div class="credentials-box">
-            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">Your Login Credentials</p>
-            
+            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">After clicking the link, sign in with:</p>
+
             <div class="credential-item">
-              <div class="credential-label">Voter Token</div>
-              <div class="credential-value">${token}</div>
+              <div class="credential-label">Student Number</div>
+              <div class="credential-value">${studentId}</div>
             </div>
-            
+
             <div class="credential-item">
               <div class="credential-label">Password</div>
               <div class="credential-value">${password}</div>
             </div>
           </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${loginUrl}" class="button" style="color: white;">
-              🗳️ Go to Voting Portal
-            </a>
+
+          <div class="warning">
+            <strong>⚠️ Important:</strong> This link and these credentials are unique to you — do not share them. They expire automatically once the election ends.
           </div>
 
-          <div class="info-box">
-            <strong>📍 Voting Portal URL:</strong><br>
-            <a href="${loginUrl}" style="color: #6366f1; word-break: break-all;">${loginUrl}</a>
-          </div>
-          
-          <div class="warning">
-            <strong>⚠️ Important:</strong> Keep these credentials safe. You will need them to cast your vote. These credentials will expire after you vote.
-          </div>
-          
-          <p><strong>How to Vote:</strong></p>
-          <ol>
-            <li>Click the button above or visit the voting portal link</li>
-            <li>Enter your token and password</li>
-            <li>Review the candidates and cast your vote</li>
-            <li>Submit your ballot</li>
-          </ol>
-          
           <p style="margin-top: 30px;">If you have any questions or issues, please contact the election organizers.</p>
-          
+
           <p>Best regards,<br>Election Management Team</p>
         </div>
         <div class="footer">
@@ -380,30 +393,24 @@ async function sendVoterCredentials(
 
   const text = `
     Hello ${name},
-    
+
     You have been registered as a voter for ${electionTitle}.
-    
+
     ELECTION PERIOD:
     Start: ${startDateFormatted}
     End: ${endDateFormatted}
-    
-    Your Login Credentials:
-    Token: ${token}
+
+    Your secure voting link: ${loginUrl}
+
+    After clicking the link, sign in with:
+    Student Number: ${studentId}
     Password: ${password}
-    
-    Voting Portal: ${loginUrl}
-    
-    Keep these credentials safe. You will need them to cast your vote.
-    These credentials will expire after you vote.
-    
-    How to Vote:
-    1. Visit the voting portal: ${loginUrl}
-    2. Enter your token and password
-    3. Review the candidates and cast your vote
-    4. Submit your ballot
-    
+
+    This link and these credentials are unique to you — do not share them.
+    They expire automatically once the election ends.
+
     If you have any questions, please contact the election organizers.
-    
+
     Best regards,
     Election Management Team
   `;

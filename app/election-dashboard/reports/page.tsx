@@ -22,14 +22,19 @@ import {
 import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import ConfirmModal from "@/components/ConfirmModal";
+import ElectionStatusBadge from "@/components/ElectionStatusBadge";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface Election {
   _id: string;
   title: string;
+  alias?: string;
   startDate: string;
   endDate: string;
   status: string;
+  settings?: {
+    requireAgentSignature?: boolean;
+  };
 }
 
 interface VoterActivity {
@@ -885,19 +890,33 @@ export default function ReportsPage() {
             className="w-full text-sm font-medium text-gray-800 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#D4AF37] bg-gray-50"
           >
             {elections.map((e) => (
-              <option key={e._id} value={e._id}>{e.title}</option>
+              <option key={e._id} value={e._id}>{e.title}{e.alias ? ` — ${e.alias}` : ""}</option>
             ))}
           </select>
         </div>
         {currentElection && (
           <div className="flex items-center gap-3 text-sm text-gray-500 shrink-0">
-            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-              currentElection.status === "active" ? "bg-green-100 text-[#D4AF37]"
-              : currentElection.status === "ended" ? "bg-gray-100 text-gray-600"
-              : "bg-yellow-100 text-yellow-700"
-            }`}>
-              {currentElection.status}
-            </span>
+            {currentElection.alias && (
+              <span className="hidden sm:inline px-2 py-0.5 rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs font-mono font-semibold">
+                {currentElection.alias}
+              </span>
+            )}
+            <ElectionStatusBadge election={currentElection} />
+            {currentElection.settings?.requireAgentSignature ? (
+              <span
+                className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-semibold"
+                title="Candidates' signatures require their assigned polling agent's password"
+              >
+                <Shield size={11} /> Agent-Verified Signing
+              </span>
+            ) : (
+              <span
+                className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs font-semibold"
+                title="Anyone can sign for a candidate — no agent verification required"
+              >
+                Open Signing
+              </span>
+            )}
             <span className="hidden sm:inline text-gray-300">|</span>
             <span className="hidden sm:inline">{new Date(currentElection.endDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</span>
           </div>
@@ -1324,7 +1343,11 @@ export default function ReportsPage() {
                                     fieldKey={`polling_agent_${pos.position}_${c.name}`}
                                     label={`${c.name} — Agent Signature (${pos.position})`}
                                     signatures={signatures}
-                                    onSign={(key, label) => handleAgentSign(key, label, c.name, pos.position)}
+                                    onSign={(key, label) =>
+                                      currentElection?.settings?.requireAgentSignature
+                                        ? handleAgentSign(key, label, c.name, pos.position)
+                                        : openSigModal(key, label)
+                                    }
                                   />
                                 </td>
                               </tr>
@@ -1615,7 +1638,11 @@ export default function ReportsPage() {
                                       fieldKey={`agent_${pos.position}_${c.name}`}
                                       label={`${c.name} — Agent Signature`}
                                       signatures={signatures}
-                                      onSign={(key, label) => handleAgentSign(key, label, c.name, pos.position)}
+                                      onSign={(key, label) =>
+                                        currentElection?.settings?.requireAgentSignature
+                                          ? handleAgentSign(key, label, c.name, pos.position)
+                                          : openSigModal(key, label)
+                                      }
                                     />
                                   </td>
                                 </tr>

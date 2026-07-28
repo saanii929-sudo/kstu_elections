@@ -3,6 +3,7 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 export interface IElection extends Document {
   organizationId: mongoose.Types.ObjectId;
   title: string;
+  alias: string;
   description: string;
   startDate: Date;
   endDate: Date;
@@ -12,7 +13,15 @@ export interface IElection extends Document {
     allowRevote: boolean;
     requireAllCategories: boolean;
     requireOTP: boolean;
+    // When true, a candidate's signature on the pink sheet/reports must come
+    // from that candidate's assigned polling agent (password-verified). When
+    // false, anyone can sign directly — no agent gate.
+    requireAgentSignature: boolean;
   };
+  // Advisory oversight — Super Admin can approve/reject, but neither status
+  // blocks the organization from running the election or publishing results.
+  approvalStatus: 'pending' | 'approved' | 'rejected';
+  resultsApprovalStatus: 'pending' | 'approved' | 'rejected';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,6 +37,15 @@ const ElectionSchema: Schema = new Schema(
       type: String,
       required: [true, 'Election title is required'],
       trim: true,
+    },
+    alias: {
+      type: String,
+      required: [true, 'Election alias is required'],
+      trim: true,
+      uppercase: true,
+      unique: true,
+      sparse: true,
+      match: [/^[A-Z0-9][A-Z0-9-]{1,19}$/, 'Alias must be 2-20 characters: letters, numbers, and hyphens only'],
     },
     description: {
       type: String,
@@ -63,6 +81,20 @@ const ElectionSchema: Schema = new Schema(
         type: Boolean,
         default: false,
       },
+      requireAgentSignature: {
+        type: Boolean,
+        default: false,
+      },
+    },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    resultsApprovalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
     },
   },
   {

@@ -5,6 +5,7 @@ import Election from '@/models/Election';
 import { verifyToken, hashPassword } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { sendVoterCredentialsSms } from '@/services/sms.service';
+import { generateVoterLinkHash, buildVoterLoginUrl } from '@/lib/voterLink';
 
 function generatePassword(): string {
   const uppercase = 'ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -35,13 +36,14 @@ function generatePassword(): string {
 async function sendVoterCredentials(
   email: string,
   name: string,
-  token: string,
+  studentId: string,
   password: string,
   electionTitle: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  secureLink: string
 ) {
-  const loginUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/election/login`;
+  const loginUrl = secureLink;
 
   // Format dates
   const formatDate = (date: Date) => {
@@ -85,8 +87,8 @@ async function sendVoterCredentials(
         </div>
         <div class="content">
           <p>Hello <strong>${name}</strong>,</p>
-          <p>Your voting credentials for <strong>${electionTitle}</strong> have been resent as requested.</p>
-          
+          <p>Your voting link and credentials for <strong>${electionTitle}</strong> have been resent as requested.</p>
+
           <div class="date-box">
             <p style="margin: 0; font-size: 14px;"><strong>📅 Election Period:</strong></p>
             <p style="margin: 5px 0 0 0; font-size: 14px;">
@@ -94,37 +96,29 @@ async function sendVoterCredentials(
               <strong>End:</strong> ${endDateFormatted}
             </p>
           </div>
-          
+
+          <div style="text-align: center;">
+            <a href="${loginUrl}" class="button">Start Voting</a>
+          </div>
+
           <div class="credentials-box">
-            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">Your Login Credentials</p>
-            
+            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">After clicking the link, sign in with:</p>
+
             <div class="credential-item">
-              <div class="credential-label">Voter Token</div>
-              <div class="credential-value">${token}</div>
+              <div class="credential-label">Student Number</div>
+              <div class="credential-value">${studentId}</div>
             </div>
-            
+
             <div class="credential-item">
               <div class="credential-label">Password</div>
               <div class="credential-value">${password}</div>
             </div>
           </div>
-          
-          <div style="text-align: center;">
-            <a href="${loginUrl}" class="button">Go to Voting Portal</a>
-          </div>
-          
+
           <div class="warning">
-            <strong>⚠️ Important:</strong> Keep these credentials safe. You will need them to cast your vote. These credentials will expire after you vote.
+            <strong>⚠️ Important:</strong> This link and these credentials are unique to you — do not share them. Any previous link or password you were sent no longer works.
           </div>
-          
-          <h3>How to Vote:</h3>
-          <ol>
-            <li>Visit the voting portal using the button above</li>
-            <li>Enter your token and password</li>
-            <li>Review the candidates carefully</li>
-            <li>Cast your vote</li>
-          </ol>
-          
+
           <p>If you did not request this resend or have any questions, please contact the election administrator.</p>
         </div>
         <div class="footer">
@@ -138,28 +132,22 @@ async function sendVoterCredentials(
 
   const text = `
     Hello ${name},
-    
-    Your voting credentials for ${electionTitle} have been resent as requested.
-    
+
+    Your voting link and credentials for ${electionTitle} have been resent as requested.
+
     ELECTION PERIOD:
     Start: ${startDateFormatted}
     End: ${endDateFormatted}
-    
-    Your Login Credentials:
-    Token: ${token}
+
+    Your voting link: ${loginUrl}
+
+    After clicking the link, sign in with:
+    Student Number: ${studentId}
     Password: ${password}
-    
-    Voting Portal: ${loginUrl}
-    
-    Keep these credentials safe. You will need them to cast your vote.
-    These credentials will expire after you vote.
-    
-    How to Vote:
-    1. Visit the voting portal
-    2. Enter your token and password
-    3. Review the candidates carefully
-    4. Cast your vote
-    
+
+    This link and these credentials are unique to you — do not share them.
+    Any previous link or password you were sent no longer works.
+
     If you did not request this resend or have any questions, please contact the election administrator.
   `;
 
@@ -245,10 +233,13 @@ async function resendCredentials(
       voter.phone = updatedPhone;
     }
 
-    // Always generate a fresh password on resend — never store plaintext
+    // Always generate a fresh password on resend — never store plaintext.
+    // The link hash depends on the password hash, so this also rotates the
+    // voter's secure link, automatically invalidating the previous one.
     const plainPassword = generatePassword();
     const hashedPassword = await hashPassword(plainPassword);
-    const updateFields: any = { password: hashedPassword };
+    const linkHash = generateVoterLinkHash(voter.token, hashedPassword);
+    const updateFields: any = { password: hashedPassword, linkHash, linkExpiresAt: election.endDate };
     if (updatedPhone) updateFields.phone = updatedPhone;
     await Voter.findByIdAndUpdate(voter._id, updateFields);
 
@@ -257,6 +248,9 @@ async function resendCredentials(
     let smsSent = false;
     let errors: string[] = [];
 
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+    const secureLink = buildVoterLoginUrl(baseUrl, linkHash);
+
     try {
       // Send email if available
       if (voter.email) {
@@ -264,11 +258,12 @@ async function resendCredentials(
           await sendVoterCredentials(
             voter.email,
             voter.name,
-            voter.token,
+            voter.voterId!,
             plainPassword,
             election.title,
             election.startDate,
-            election.endDate
+            election.endDate,
+            secureLink
           );
           emailSent = true;
         } catch (emailError) {
@@ -283,11 +278,13 @@ async function resendCredentials(
           const smsResult = await sendVoterCredentialsSms(
             voter.phone,
             voter.name,
-            voter.token,
+            voter.voterId!,
             plainPassword,
             election.title,
             election.startDate,
-            election.endDate
+            election.endDate,
+            secureLink,
+            election.alias
           );
           if (smsResult) {
             smsSent = true;

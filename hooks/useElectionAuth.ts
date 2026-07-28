@@ -43,8 +43,10 @@ export function useElectionAuth() {
   }, [router]);
 
   useEffect(() => {
-    // Don't guard the login page
-    if (pathname === '/election/login') return;
+    // Don't guard the login page or the no-access page — neither requires
+    // (or can have) a voter session, and no-access must stay reachable
+    // without one to avoid a redirect loop with the login-page middleware.
+    if (pathname === '/election/login' || pathname === '/election/no-access') return;
 
     // Immediate check
     if (!isSessionValid()) {

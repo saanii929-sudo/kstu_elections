@@ -4,19 +4,20 @@ import Voter from '@/models/Voter';
 import Election from '@/models/Election';
 import { verifyToken } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
+import { buildVoterLoginUrl } from '@/lib/voterLink';
 
 // Send voter credentials via email
 async function sendVoterCredentials(
   email: string,
   name: string,
-  token: string,
+  studentId: string,
   password: string,
   electionTitle: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  secureLink: string
 ): Promise<boolean> {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-  const loginUrl = `${baseUrl}/election/login`;
+  const loginUrl = secureLink;
 
   // Format dates
   const formatDate = (date: Date) => {
@@ -58,12 +59,12 @@ async function sendVoterCredentials(
     <body>
       <div class="container">
         <div class="header">
-          <h1>🗳️ Your Voting Credentials</h1>
+          <h1>🗳️ Your Voting Link</h1>
         </div>
         <div class="content">
           <h2>Hello ${name},</h2>
           <p>Your voter information has been updated for <strong>${electionTitle}</strong>.</p>
-          
+
           <div class="date-box">
             <p style="margin: 0; font-size: 14px;"><strong>📅 Election Period:</strong></p>
             <p style="margin: 5px 0 0 0; font-size: 14px;">
@@ -71,40 +72,41 @@ async function sendVoterCredentials(
               <strong>End:</strong> ${endDateFormatted}
             </p>
           </div>
-          
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${loginUrl}" class="button" style="color: white;">
+              🗳️ Start Voting
+            </a>
+          </div>
+
+          <div class="info-box">
+            <strong>📍 Your Secure Voting Link:</strong><br>
+            <a href="${loginUrl}" style="color: #6366f1; word-break: break-all;">${loginUrl}</a>
+          </div>
+
           <div class="credentials-box">
-            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">Your Login Credentials</p>
-            
+            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">After clicking the link, sign in with:</p>
+
             <div class="credential-item">
-              <div class="credential-label">Voter Token</div>
-              <div class="credential-value">${token}</div>
+              <div class="credential-label">Student Number</div>
+              <div class="credential-value">${studentId}</div>
             </div>
-            
+
             <div class="credential-item">
               <div class="credential-label">Password</div>
               <div class="credential-value">${password}</div>
             </div>
           </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${loginUrl}" class="button" style="color: white;">
-              🗳️ Go to Voting Portal
-            </a>
+
+          <div class="warning">
+            <strong>⚠️ Important:</strong> This link and these credentials are unique to you — do not share them.
           </div>
 
-          <div class="info-box">
-            <strong>📍 Voting Portal URL:</strong><br>
-            <a href="${loginUrl}" style="color: #6366f1; word-break: break-all;">${loginUrl}</a>
-          </div>
-          
-          <div class="warning">
-            <strong>⚠️ Important:</strong> Keep these credentials safe. You will need them to cast your vote.
-          </div>
-          
           <p>Best regards,<br>Election Management Team</p>
         </div>
         <div class="footer">
           <p>This is an automated message. Please do not reply to this email.</p>
+          <p>Your credentials are confidential. Do not share them with anyone.</p>
         </div>
       </div>
     </body>
@@ -113,21 +115,21 @@ async function sendVoterCredentials(
 
   const text = `
     Hello ${name},
-    
+
     Your voter information has been updated for ${electionTitle}.
-    
+
     ELECTION PERIOD:
     Start: ${startDateFormatted}
     End: ${endDateFormatted}
-    
-    Your Login Credentials:
-    Token: ${token}
+
+    Your secure voting link: ${loginUrl}
+
+    After clicking the link, sign in with:
+    Student Number: ${studentId}
     Password: ${password}
-    
-    Voting Portal: ${loginUrl}
-    
-    Keep these credentials safe. You will need them to cast your vote.
-    
+
+    This link and these credentials are unique to you — do not share them.
+
     Best regards,
     Election Management Team
   `;
@@ -206,15 +208,18 @@ export async function PUT(
     if (email && email !== voter.email && !voter.hasVoted && updatedVoter?.metadata?.plainPassword) {
       try {
         const election = await Election.findById(voter.electionId);
-        if (election) {
+        if (election && updatedVoter.linkHash) {
+          const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+          const secureLink = buildVoterLoginUrl(baseUrl, updatedVoter.linkHash);
           await sendVoterCredentials(
             email,
             updatedVoter.name,
-            updatedVoter.token,
+            updatedVoter.voterId!,
             updatedVoter.metadata.plainPassword,
             election.title,
             election.startDate,
-            election.endDate
+            election.endDate,
+            secureLink
           );
         }
       } catch (emailError) {

@@ -1,0 +1,25 @@
+node_modules
+.next
+.git
+.gitignore
+
+# env files — pass real secrets in at `docker run`/compose time, never bake them into the image
+.env
+.env.*
+!.env.example
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+coverage
+__tests__
+
+*.md
+.vscode
+.idea
+
+Dockerfile
+docker-compose*.yml
+.dockerignore

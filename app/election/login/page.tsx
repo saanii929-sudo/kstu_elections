@@ -2,21 +2,24 @@
 
 import {
   useState,
-  FormEvent,
   useEffect,
   useRef,
+  FormEvent,
   KeyboardEvent,
   ClipboardEvent,
+  Suspense,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
   Lock,
-  Mail,
+  IdCard,
   Eye,
   EyeOff,
   ShieldCheck,
   CheckCircle2,
+  ShieldAlert,
+  Clock,
 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import { motion } from "framer-motion";
@@ -31,13 +34,29 @@ const fadeUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
 };
 
-export default function VoterLoginPage() {
+type PageStatus = "verifying" | "login-form" | "error" | "not-started";
+
+function VoterLoginPageInner() {
   const router = useRouter();
-  const [token, setToken] = useState("");
+  const searchParams = useSearchParams();
+  // The secure link has no `key=` — the entire query string IS the hash
+  // (e.g. /election/login?3f9a1c...), so the first (only) param key is it.
+  const linkHash = searchParams.keys().next().value || null;
+
+  const [status, setStatus] = useState<PageStatus>("verifying");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [votingStartDate, setVotingStartDate] = useState<string | null>(null);
+  const [voterFirstName, setVoterFirstName] = useState("");
+
+  // Manual login form — the link only unlocks this form, it doesn't log
+  // the voter in by itself.
+  const [studentId, setStudentId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [votingStartDate, setVotingStartDate] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  // Tracks the voter's canonical token once known, for the OTP step
+  const [activeVoterToken, setActiveVoterToken] = useState("");
 
   // OTP state
   const [showOtpModal, setShowOtpModal] = useState(false);
@@ -66,7 +85,6 @@ export default function VoterLoginPage() {
           localStorage.removeItem("voterToken");
           localStorage.removeItem("voterData");
           localStorage.removeItem("voterTokenTimestamp");
-          toast.error("Session expired. Please login again.");
         } else if (!data.hasVoted) {
           router.push(`/election?token=${voterToken}`);
         }
@@ -106,9 +124,74 @@ export default function VoterLoginPage() {
     }
   };
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const proceedAfterLogin = async (voterData: {
+    token: string;
+    election?: { settings?: { requireOTP?: boolean } };
+    [key: string]: unknown;
+  }) => {
+    const voterToken = voterData.token as string;
+    setActiveVoterToken(voterToken);
+
+    if (voterData?.election?.settings?.requireOTP) {
+      setPendingVoterData(voterData);
+      toast.loading("Sending OTP…");
+      const contact = await sendOtp(voterToken);
+      toast.dismiss();
+      if (contact) {
+        setOtpContact(contact);
+        setDigits(["", "", "", "", "", ""]);
+        setResendCooldown(60);
+        setShowOtpModal(true);
+        setTimeout(() => digitRefs.current[0]?.focus(), 100);
+      }
+    } else {
+      localStorage.setItem("voterToken", voterToken);
+      localStorage.setItem("voterData", JSON.stringify(voterData));
+      localStorage.setItem("voterTokenTimestamp", Date.now().toString());
+      router.push(`/election?token=${voterToken}`);
+    }
+  };
+
+  // Verify the secure link on load. This only unlocks the login form below
+  // — it does not sign the voter in on its own.
+  useEffect(() => {
+    if (!linkHash) {
+      router.replace("/election/no-access");
+      return;
+    }
+
+    (async () => {
+      try {
+        const response = await fetch("/api/elections/auth/verify-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ linkHash }),
+        });
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          setVoterFirstName(data.data?.name || "");
+          setStatus("login-form");
+        } else if (data.startDate) {
+          setVotingStartDate(data.startDate);
+          setStatus("not-started");
+        } else {
+          setErrorMessage(
+            data.error || "This voting link is invalid or has expired."
+          );
+          setStatus("error");
+        }
+      } catch {
+        setErrorMessage("Network error verifying your voting link. Please try again.");
+        setStatus("error");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkHash]);
+
+  const handleLoginSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setLoading(true);
+    setLoginLoading(true);
     const loadingToast = toast.loading("Verifying credentials...");
 
     try {
@@ -116,7 +199,8 @@ export default function VoterLoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          token: token.trim().toUpperCase(),
+          linkHash,
+          studentId: studentId.trim(),
           password: password.trim(),
         }),
       });
@@ -125,28 +209,8 @@ export default function VoterLoginPage() {
 
       if (response.ok && data.success) {
         toast.dismiss(loadingToast);
-
-        if (data.data?.election?.settings?.requireOTP) {
-          setPendingVoterData(data.data);
-          toast.loading("Sending OTP…");
-          const contact = await sendOtp(token.trim().toUpperCase());
-          toast.dismiss();
-          if (contact) {
-            setOtpContact(contact);
-            setDigits(["", "", "", "", "", ""]);
-            setResendCooldown(60);
-            setShowOtpModal(true);
-            setTimeout(() => digitRefs.current[0]?.focus(), 100);
-          }
-        } else {
-          localStorage.setItem("voterToken", token.trim().toUpperCase());
-          localStorage.setItem("voterData", JSON.stringify(data.data));
-          localStorage.setItem("voterTokenTimestamp", Date.now().toString());
-          router.push(`/election?token=${token.trim().toUpperCase()}`);
-        }
+        await proceedAfterLogin(data.data);
       } else {
-        if (data.startDate) setVotingStartDate(data.startDate);
-        else setVotingStartDate(null);
         toast.error(data.error || "Invalid credentials", {
           id: loadingToast,
           duration: 4000,
@@ -158,7 +222,7 @@ export default function VoterLoginPage() {
         duration: 4000,
       });
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
     }
   };
 
@@ -214,7 +278,7 @@ export default function VoterLoginPage() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          voterToken: token.trim().toUpperCase(),
+          voterToken: activeVoterToken,
           otp: otpValue,
         }),
       });
@@ -222,10 +286,10 @@ export default function VoterLoginPage() {
       if (res.ok && data.success) {
         toast.success("OTP verified!");
         setShowOtpModal(false);
-        localStorage.setItem("voterToken", token.trim().toUpperCase());
+        localStorage.setItem("voterToken", activeVoterToken);
         localStorage.setItem("voterData", JSON.stringify(pendingVoterData));
         localStorage.setItem("voterTokenTimestamp", Date.now().toString());
-        router.push(`/election?token=${token.trim().toUpperCase()}`);
+        router.push(`/election?token=${activeVoterToken}`);
       } else {
         toast.error(data.error || "Invalid OTP");
         setDigits(["", "", "", "", "", ""]);
@@ -240,7 +304,7 @@ export default function VoterLoginPage() {
 
   const handleResendOtp = async () => {
     setResendLoading(true);
-    const contact = await sendOtp(token.trim().toUpperCase());
+    const contact = await sendOtp(activeVoterToken);
     if (contact) {
       setOtpContact(contact);
       setDigits(["", "", "", "", "", ""]);
@@ -256,6 +320,9 @@ export default function VoterLoginPage() {
     setPendingVoterData(null);
     setDigits(["", "", "", "", "", ""]);
     setResendCooldown(0);
+    // The link is still valid — send them back to the login form rather
+    // than a dead end.
+    setStatus("login-form");
   };
 
   return (
@@ -292,8 +359,71 @@ export default function VoterLoginPage() {
         <div className="absolute inset-0 bg-black/70" />
 
         <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
-          {/* ── Login Card ── */}
-          {!showOtpModal && (
+          {/* ── Verifying secure link ── */}
+          {status === "verifying" && !showOtpModal && (
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              className="w-full relative max-w-md rounded-2xl bg-white/95 p-10 shadow-2xl backdrop-blur text-center"
+            >
+              <div className="w-10 h-10 border-4 border-gray-200 border-t-[#D4AF37] rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-[#1C2338] font-semibold">Verifying your secure voting link…</p>
+            </motion.div>
+          )}
+
+          {/* ── Invalid / expired link ── */}
+          {status === "error" && !showOtpModal && (
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              className="w-full relative max-w-md rounded-2xl bg-white/95 p-8 shadow-2xl backdrop-blur text-center"
+            >
+              <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <ShieldAlert className="text-red-500" size={26} />
+              </div>
+              <h1 className="text-lg font-bold text-[#1C2338] mb-2">Unable to Sign You In</h1>
+              <p className="text-sm text-gray-500">{errorMessage}</p>
+              <p className="text-xs text-gray-400 mt-4">
+                Contact your election administrator if you believe this is a mistake.
+              </p>
+            </motion.div>
+          )}
+
+          {/* ── Voting not yet open ── */}
+          {status === "not-started" && !showOtpModal && (
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              className="w-full relative max-w-md rounded-2xl bg-white/95 p-8 shadow-2xl backdrop-blur text-center"
+            >
+              <div className="w-14 h-14 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Clock className="text-amber-500" size={26} />
+              </div>
+              <h1 className="text-lg font-bold text-[#1C2338] mb-2">Voting Not Yet Open</h1>
+              {votingStartDate && (
+                <p className="text-sm text-gray-500">
+                  Voting begins on{" "}
+                  <span className="font-bold text-gray-700">
+                    {new Date(votingStartDate).toLocaleString(undefined, {
+                      weekday: "short",
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                  . Come back and use your link again once it starts.
+                </p>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── Login form (link verified — voter must still enter credentials) ── */}
+          {status === "login-form" && !showOtpModal && (
             <motion.div
               variants={fadeUp}
               initial="hidden"
@@ -310,21 +440,27 @@ export default function VoterLoginPage() {
                 <h1 className="font-bold text-[#1C2338] text-lg">
                   Kumasi Technical University
                 </h1>
+                {voterFirstName && (
+                  <p className="text-sm text-gray-500 mt-1">
+                    Welcome back, enter your student number and password to continue.
+                  </p>
+                )}
               </div>
 
-              <form className="space-y-5" onSubmit={handleSubmit}>
+              <form className="space-y-5" onSubmit={handleLoginSubmit}>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">
-                    Voter Token
+                    Student Number
                   </label>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                    <IdCard className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
                     <input
                       type="text"
                       required
-                      placeholder="Enter your 8-character token"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value.toUpperCase())}
+                      autoFocus
+                      placeholder="Enter your student number"
+                      value={studentId}
+                      onChange={(e) => setStudentId(e.target.value)}
                       className="w-full rounded-lg border border-gray-300 py-3 pl-11 pr-4 text-sm focus:border-[#D4AF37] focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/20"
                     />
                   </div>
@@ -342,7 +478,7 @@ export default function VoterLoginPage() {
                       placeholder="Enter your password"
                       value={password}
                       minLength={6}
-                      disabled={loading}
+                      disabled={loginLoading}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full rounded-lg border border-gray-300 py-3 pl-11 pr-11 text-sm focus:border-[#D4AF37] focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/20"
                     />
@@ -360,36 +496,12 @@ export default function VoterLoginPage() {
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   type="submit"
-                  disabled={loading}
+                  disabled={loginLoading}
                   className="w-full rounded-lg bg-[#D4AF37] py-3 font-semibold text-white hover:bg-[#D4AF37] disabled:opacity-60 transition"
                 >
-                  {loading ? "Verifying..." : "Login to Vote"}
+                  {loginLoading ? "Verifying..." : "Login to Vote"}
                 </motion.button>
               </form>
-
-              {votingStartDate && (
-                <div className="mt-4 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-                  <span className="text-amber-500 mt-0.5 shrink-0">🕒</span>
-                  <div>
-                    <p className="text-sm font-semibold text-amber-800">
-                      Voting not yet open
-                    </p>
-                    <p className="text-xs text-amber-700 mt-0.5">
-                      Voting begins on{" "}
-                      <span className="font-bold">
-                        {new Date(votingStartDate).toLocaleString(undefined, {
-                          weekday: "short",
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              )}
 
               <div className="text-center mt-6">
                 <p className="text-gray-500 text-sm">
@@ -502,5 +614,13 @@ export default function VoterLoginPage() {
         </div>
       </motion.section>
     </>
+  );
+}
+
+export default function VoterLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-black" />}>
+      <VoterLoginPageInner />
+    </Suspense>
   );
 }

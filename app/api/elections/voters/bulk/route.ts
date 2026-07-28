@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import connectDB from '@/lib/mongodb';
 import Voter from '@/models/Voter';
 import Election from '@/models/Election';
+import ElectionVote from '@/models/ElectionVote';
 import { verifyToken } from '@/lib/auth';
 import { hashPassword } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { sendVoterCredentialsSms } from '@/services/sms.service';
+import { generateVoterLinkHash, buildVoterLoginUrl } from '@/lib/voterLink';
+import { logAudit } from '@/lib/auditLog';
 
 function scientificToDecimal(num: string): string {
   const numStr = String(num).trim();
@@ -80,14 +84,14 @@ function generatePassword(): string {
 async function sendVoterCredentials(
   email: string,
   name: string,
-  token: string,
+  studentId: string,
   password: string,
   electionTitle: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  secureLink: string
 ): Promise<boolean> {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-  const loginUrl = `${baseUrl}/election/login`;
+  const loginUrl = secureLink;
   const formatDate = (date: Date) => {
     return new Date(date).toLocaleString('en-GB', {
       weekday: 'long',
@@ -126,12 +130,12 @@ async function sendVoterCredentials(
     <body>
       <div class="container">
         <div class="header">
-          <h1>🗳️ Your Voting Credentials</h1>
+          <h1>🗳️ You&#39;re Invited to Vote</h1>
         </div>
         <div class="content">
           <h2>Hello ${name},</h2>
           <p>You have been registered as a voter for <strong>${electionTitle}</strong>.</p>
-          
+
           <div class="date-box">
             <p style="margin: 0; font-size: 14px;"><strong>📅 Election Period:</strong></p>
             <p style="margin: 5px 0 0 0; font-size: 14px;">
@@ -139,45 +143,38 @@ async function sendVoterCredentials(
               <strong>End:</strong> ${endDateFormatted}
             </p>
           </div>
-          
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${loginUrl}" class="button" style="color: white;">
+              🗳️ Start Voting
+            </a>
+          </div>
+
+          <div class="info-box">
+            <strong>📍 Your Secure Voting Link:</strong><br>
+            <a href="${loginUrl}" style="color: #6366f1; word-break: break-all;">${loginUrl}</a>
+          </div>
+
           <div class="credentials-box">
-            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">Your Login Credentials</p>
-            
+            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">After clicking the link, sign in with:</p>
+
             <div class="credential-item">
-              <div class="credential-label">Voter Token</div>
-              <div class="credential-value">${token}</div>
+              <div class="credential-label">Student Number</div>
+              <div class="credential-value">${studentId}</div>
             </div>
-            
+
             <div class="credential-item">
               <div class="credential-label">Password</div>
               <div class="credential-value">${password}</div>
             </div>
           </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${loginUrl}" class="button" style="color: white;">
-              🗳️ Go to Voting Portal
-            </a>
+
+          <div class="warning">
+            <strong>⚠️ Important:</strong> This link and these credentials are unique to you — do not share them. They expire automatically once the election ends.
           </div>
 
-          <div class="info-box">
-            <strong>📍 Voting Portal URL:</strong><br>
-            <a href="${loginUrl}" style="color: #6366f1; word-break: break-all;">${loginUrl}</a>
-          </div>
-          
-          <div class="warning">
-            <strong>⚠️ Important:</strong> Keep these credentials safe. You will need them to cast your vote.
-          </div>
-          
-          <p><strong>How to Vote:</strong></p>
-          <ol>
-            <li>Visit the voting portal and enter your credentials</li>
-            <li>Review the candidates and cast your vote</li>
-            <li>Submit your ballot</li>
-          </ol>
-          
           <p style="margin-top: 30px;">If you have any questions, please contact the election organizers.</p>
-          
+
           <p>Best regards,<br>Election Management Team</p>
         </div>
         <div class="footer">
@@ -190,21 +187,22 @@ async function sendVoterCredentials(
 
   const text = `
     Hello ${name},
-    
+
     You have been registered as a voter for ${electionTitle}.
-    
+
     ELECTION PERIOD:
     Start: ${startDateFormatted}
     End: ${endDateFormatted}
-    
-    Your Login Credentials:
-    Token: ${token}
+
+    Your secure voting link: ${loginUrl}
+
+    After clicking the link, sign in with:
+    Student Number: ${studentId}
     Password: ${password}
-    
-    Voting Portal: ${loginUrl}
-    
-    Keep these credentials safe. You will need them to cast your vote.
-    
+
+    This link and these credentials are unique to you — do not share them.
+    They expire automatically once the election ends.
+
     Best regards,
     Election Management Team
   `;
@@ -257,6 +255,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Every voter created by this request is tagged with the same batch id,
+    // so the whole upload can be undone as a unit if it was a mistake.
+    const batchId = crypto.randomBytes(8).toString('hex');
+
     const election = await Election.findOne({
       _id: electionId,
       organizationId: decoded.id,
@@ -293,9 +295,11 @@ export async function POST(req: NextRequest) {
         row: number;
         name: string;
         token: string;
+        voterId: string;
         password: string;
         email?: string;
         phone?: string;
+        linkHash: string;
       }>;
       failed: Array<{
         row: number;
@@ -320,18 +324,25 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        if (voterData.voterId) {
-          const vidStr = String(voterData.voterId).trim();
-          if (existingVoterIds.has(vidStr) || batchVoterIds.has(vidStr)) {
-            results.failed.push({
-              row: i + 1,
-              data: voterData,
-              error: `Voter ID ${vidStr} is already registered in this election`,
-            });
-            continue;
-          }
-          batchVoterIds.add(vidStr);
+        if (!voterData.voterId || !String(voterData.voterId).trim()) {
+          results.failed.push({
+            row: i + 1,
+            data: voterData,
+            error: 'Student number (voterId) is required',
+          });
+          continue;
         }
+
+        const vidStr = String(voterData.voterId).trim();
+        if (existingVoterIds.has(vidStr) || batchVoterIds.has(vidStr)) {
+          results.failed.push({
+            row: i + 1,
+            data: voterData,
+            error: `Student number ${vidStr} is already registered in this election`,
+          });
+          continue;
+        }
+        batchVoterIds.add(vidStr);
 
         if (voterData.email) {
           const emailStr = String(voterData.email).trim().toLowerCase();
@@ -348,8 +359,12 @@ export async function POST(req: NextRequest) {
 
         let phoneNumber = null;
         if (voterData.phone) {
-          let phoneStr = String(voterData.phone).trim();
-          
+          // Defensive: a phone number should never legitimately contain a
+          // quote character. Excel CSV exports often wrap numeric-looking
+          // cells in quotes (e.g. `"0551234567"`) to preserve leading
+          // zeros — strip them here in case they slipped through parsing.
+          let phoneStr = String(voterData.phone).trim().replace(/"/g, '');
+
           if (phoneStr.includes('E') || phoneStr.includes('e')) {
             phoneStr = scientificToDecimal(phoneStr);
            
@@ -379,6 +394,7 @@ export async function POST(req: NextRequest) {
         const voterToken = await generateUniqueToken(existingTokens);
         const password = generatePassword();
         const hashedPassword = await hashPassword(password);
+        const linkHash = generateVoterLinkHash(voterToken, hashedPassword);
 
         votersToCreate.push({
           electionId,
@@ -386,9 +402,12 @@ export async function POST(req: NextRequest) {
           name: voterData.name,
           email: voterData.email || null,
           phone: phoneNumber,
-          voterId: voterData.voterId || null,
+          voterId: vidStr,
           token: voterToken,
           password: hashedPassword,
+          linkHash,
+          linkExpiresAt: election.endDate,
+          importBatchId: batchId,
           metadata: {
             department: voterData.department || null,
             class: voterData.class || null,
@@ -403,9 +422,11 @@ export async function POST(req: NextRequest) {
           row: i + 1,
           name: voterData.name,
           token: voterToken,
+          voterId: vidStr,
           password: password,
           email: voterData.email,
           phone: phoneNumber || undefined,
+          linkHash,
         });
       } catch (error: any) {
         results.failed.push({
@@ -430,7 +451,7 @@ export async function POST(req: NextRequest) {
             } else if (field === 'phone') {
               errorMsg = `Phone ${failedVoter.phone} is already registered in this election`;
             } else if (field === 'voterId') {
-              errorMsg = `Voter ID ${failedVoter.voterId} is already registered in this election`;
+              errorMsg = `Student number ${failedVoter.voterId} is already registered in this election`;
             } else if (field === 'token') {
               errorMsg = 'Token conflict';
             }
@@ -453,21 +474,26 @@ export async function POST(req: NextRequest) {
     let emailsFailed = 0;
     let smsSent = 0;
     let smsFailed = 0;
-    
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+
     if (results.success.length > 0) {
       for (const voter of results.success) {
+        const secureLink = buildVoterLoginUrl(baseUrl, voter.linkHash);
+
         if (voter.email && (deliveryMethod === 'email' || deliveryMethod === 'both')) {
           try {
             const emailSent = await sendVoterCredentials(
               voter.email,
               voter.name,
-              voter.token,
+              voter.voterId,
               voter.password,
               election.title,
               election.startDate,
-              election.endDate
+              election.endDate,
+              secureLink
             );
-            
+
             if (emailSent) {
               emailsSent++;
             } else {
@@ -484,13 +510,15 @@ export async function POST(req: NextRequest) {
             const smsSentSuccess = await sendVoterCredentialsSms(
               voter.phone,
               voter.name,
-              voter.token,
+              voter.voterId,
               voter.password,
               election.title,
               election.startDate,
-              election.endDate
+              election.endDate,
+              secureLink,
+              election.alias
             );
-            
+
             if (smsSentSuccess) {
               smsSent++;
             } else {
@@ -502,6 +530,16 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+    }
+
+    if (results.success.length > 0) {
+      await logAudit({
+        actor: { id: decoded.id, email: decoded.email, role: decoded.role },
+        action: 'voters.bulk_import',
+        targetType: 'Election',
+        targetId: String(electionId),
+        details: { batchId, imported: results.success.length, failed: results.failed.length },
+      });
     }
 
     return NextResponse.json({
@@ -517,12 +555,91 @@ export async function POST(req: NextRequest) {
         smsFailed,
         voters: results.success,
         errors: results.failed,
+        batchId: results.success.length > 0 ? batchId : undefined,
       },
     });
   } catch (error: any) {
     console.error('Bulk upload voters error:', error);
     return NextResponse.json(
       { error: 'Failed to upload voters', details: process.env.NODE_ENV === 'development' ? error.message : undefined },
+      { status: 500 }
+    );
+  }
+}
+
+// Undo a bulk import: removes every voter created in one batch, unless they
+// have already voted (those are reported back but left intact to protect
+// real votes).
+export async function DELETE(req: NextRequest) {
+  try {
+    await connectDB();
+
+    const token = req.headers.get('authorization')?.replace('Bearer ', '');
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const decoded = verifyToken(token);
+    if (!decoded || decoded.role !== 'organization') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const batchId = searchParams.get('batchId');
+    const electionId = searchParams.get('electionId');
+
+    if (!batchId || !electionId) {
+      return NextResponse.json({ error: 'batchId and electionId are required' }, { status: 400 });
+    }
+
+    const election = await Election.findOne({ _id: electionId, organizationId: decoded.id });
+    if (!election) {
+      return NextResponse.json({ error: 'Election not found' }, { status: 404 });
+    }
+
+    const batchVoters = await Voter.find({
+      electionId,
+      organizationId: decoded.id,
+      importBatchId: batchId,
+    });
+
+    if (batchVoters.length === 0) {
+      return NextResponse.json({ error: 'This upload batch was not found, or has already been removed.' }, { status: 404 });
+    }
+
+    const removable = batchVoters.filter((v) => !v.hasVoted);
+    const blocked = batchVoters.filter((v) => v.hasVoted);
+    const removableIds = removable.map((v) => v._id);
+
+    await Promise.all([
+      Voter.deleteMany({ _id: { $in: removableIds } }),
+      ElectionVote.deleteMany({ voterId: { $in: removableIds } }),
+    ]);
+
+    await logAudit({
+      actor: { id: decoded.id, email: decoded.email, role: decoded.role },
+      action: 'voters.bulk_import_undo',
+      targetType: 'Election',
+      targetId: String(electionId),
+      details: { batchId, removed: removable.length, blocked: blocked.length },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message:
+        blocked.length > 0
+          ? `Removed ${removable.length} voter(s). ${blocked.length} could not be removed because they have already voted.`
+          : `Removed ${removable.length} voter(s) from this upload.`,
+      data: {
+        removed: removable.length,
+        blocked: blocked.length,
+        blockedNames: blocked.map((v) => v.name),
+      },
+    });
+  } catch (error: any) {
+    console.error('Undo bulk import error:', error);
+    return NextResponse.json(
+      { error: 'Failed to undo upload', details: process.env.NODE_ENV === 'development' ? error.message : undefined },
       { status: 500 }
     );
   }

@@ -9,6 +9,14 @@ export interface IVoter extends Document {
   voterId?: string;
   token: string;
   password: string;
+  // Secure one-click voting link identifier — an HMAC of (token + password hash),
+  // so it's unique per voter and automatically rotates whenever the password
+  // is regenerated (e.g. on resend). Looked up directly; never reversed.
+  linkHash?: string;
+  linkExpiresAt?: Date;
+  // Groups voters created together in one bulk-upload request, so a
+  // mistaken upload (wrong file/wrong election) can be undone as a unit.
+  importBatchId?: string;
   hasVoted: boolean;
   votedAt?: Date;
   status: 'active' | 'expired' | 'disabled';
@@ -48,8 +56,11 @@ const VoterSchema: Schema = new Schema(
       type: String,
       trim: true,
     },
+    // Student number — the credential students log in with (paired with
+    // password). Unique per election, enforced by the compound index below.
     voterId: {
       type: String,
+      required: [true, 'Student number is required'],
       trim: true,
     },
     token: {
@@ -61,6 +72,18 @@ const VoterSchema: Schema = new Schema(
     password: {
       type: String,
       required: true,
+    },
+    linkHash: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    linkExpiresAt: {
+      type: Date,
+    },
+    importBatchId: {
+      type: String,
+      index: true,
     },
     hasVoted: {
       type: Boolean,

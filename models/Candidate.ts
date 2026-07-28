@@ -10,6 +10,8 @@ export interface ICandidate extends Document {
   manifesto?: string;
   ballotNumber: number;
   voteCount: number;
+  // Advisory oversight only — does not block the candidate from appearing on the ballot.
+  approvalStatus: 'pending' | 'approved' | 'rejected';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +56,11 @@ const CandidateSchema: Schema = new Schema(
     voteCount: {
       type: Number,
       default: 0,
+    },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
     },
   },
   {

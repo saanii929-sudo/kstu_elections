@@ -37,6 +37,50 @@ interface Election {
   endDate: string;
 }
 
+/**
+ * Parses one CSV line into fields, honouring quoted values.
+ *
+ * A naive `line.split(",")` breaks on real-world exports: Excel wraps
+ * numeric-looking cells (phone numbers especially) in double quotes to
+ * preserve leading zeros, e.g. `"0551234567"` — a plain split leaves the
+ * quote characters embedded in the value, which is exactly what corrupts
+ * phone numbers and breaks SMS sending. This also correctly un-escapes
+ * `""` (an escaped quote inside a quoted field) and treats commas inside
+ * quotes as part of the value rather than a field separator.
+ */
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += char;
+      }
+    } else if (char === '"') {
+      inQuotes = true;
+    } else if (char === ",") {
+      fields.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  fields.push(current.trim());
+
+  return fields;
+}
+
 export default function VotersPage() {
   const [elections, setElections] = useState<Election[]>([]);
   const [selectedElection, setSelectedElection] = useState("");
@@ -49,6 +93,13 @@ export default function VotersPage() {
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
   const [search, setSearch] = useState("");
   const [uploadResults, setUploadResults] = useState<any>(null);
+  // Parsed-but-not-yet-submitted bulk upload — the admin must confirm before
+  // this is sent to the server, so a wrong file can be caught first.
+  const [pendingBulkFile, setPendingBulkFile] = useState<{
+    fileName: string;
+    rows: Record<string, string>[];
+  } | null>(null);
+  const [undoingBatch, setUndoingBatch] = useState(false);
   const [resendingCredentials, setResendingCredentials] = useState<
     string | null
   >(null);
@@ -193,11 +244,11 @@ export default function VotersPage() {
             : "Voter added successfully!",
         );
 
-        if (!editingVoter && data.data.plainPassword) {
+        if (!editingVoter && data.data.password) {
           setAlertModal({
             isOpen: true,
             title: "Voter Credentials",
-            message: `Token: ${data.data.token}\nPassword: ${data.data.plainPassword}\n\nPlease save these credentials!`,
+            message: `Student Number: ${data.data.voterId}\nPassword: ${data.data.password}\n\nPlease save these credentials!`,
             type: "success"
           });
         }
@@ -315,7 +366,9 @@ export default function VotersPage() {
     }
   };
 
-  const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Step 1: parse the CSV locally and show a preview — nothing is sent to
+  // the server yet, so a wrong file can be caught before it does any harm.
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -325,108 +378,159 @@ export default function VotersPage() {
       return;
     }
 
-    setUploadingBulk(true);
-    setUploadResults(null);
-
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        const lines = text.split("\n").filter((line) => line.trim());
+        // Excel typically ends lines with \r\n — strip the \r so it can't
+        // end up appended to whichever field is last on the line.
+        const lines = text.split("\n").map((line) => line.replace(/\r$/, "")).filter((line) => line.trim());
 
         if (lines.length < 2) {
           toast.error("CSV file must have at least a header and one data row");
-          setUploadingBulk(false);
           return;
         }
 
-        const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
-        const voters = [];
+        // Header matching is case-insensitive, but the row keys sent to the
+        // bulk API must match its camelCase field names exactly (voterId,
+        // studentId) — lowercasing alone would silently drop those columns.
+        const CANONICAL_FIELD_NAMES: Record<string, string> = {
+          voterid: "voterId",
+          studentid: "studentId",
+        };
+        const headers = parseCsvLine(lines[0]).map((h) => {
+          const lower = h.toLowerCase();
+          return CANONICAL_FIELD_NAMES[lower] || lower;
+        });
+        const rows: Record<string, string>[] = [];
 
         for (let i = 1; i < lines.length; i++) {
-          const values = lines[i].split(",").map((v) => v.trim());
-          const voter: any = {};
+          const values = parseCsvLine(lines[i]);
+          const row: Record<string, string> = {};
 
           headers.forEach((header, index) => {
             if (values[index]) {
-              voter[header] = values[index];
+              row[header] = values[index];
             }
           });
 
-          voters.push(voter);
+          rows.push(row);
         }
 
-        const response = await authFetch("/api/elections/voters/bulk", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            electionId: selectedElection,
-            voters,
-            deliveryMethod: bulkDeliveryMethod, // Add delivery method
-          }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          let hasPhonePrecisionLoss = false;
-          if (data.data.voters) {
-            hasPhonePrecisionLoss = data.data.voters.some((v: any) => {
-              if (v.phone) {
-                const trailingZeros = v.phone.match(/0{4,}$/);
-                return trailingZeros !== null;
-              }
-              return false;
-            });
-          }
-
-          let message = `Successfully uploaded ${data.data.successful} voters!`;
-          const notifications = [];
-
-          if (data.data.emailsSent !== undefined) {
-            notifications.push(
-              `Emails: ${data.data.emailsSent} sent${data.data.emailsFailed > 0 ? ` (${data.data.emailsFailed} failed)` : ""}`,
-            );
-          }
-
-          if (data.data.smsSent !== undefined) {
-            notifications.push(
-              `SMS: ${data.data.smsSent} sent${data.data.smsFailed > 0 ? ` (${data.data.smsFailed} failed)` : ""}`,
-            );
-          }
-
-          if (notifications.length > 0) {
-            message += ` | ${notifications.join(" | ")}`;
-          }
-
-          toast.success(message);
-
-          fetchVoters();
-          setShowBulkModal(false);
-          setUploadResults(null);
-        } else {
-          const data = await response.json();
-          toast.error(data.error || "Failed to upload voters");
+        if (rows.length === 0) {
+          toast.error("No data rows found in this file");
+          return;
         }
+
+        setPendingBulkFile({ fileName: file.name, rows });
       } catch (error) {
         console.error("CSV parse error:", error);
         toast.error("Failed to parse CSV file");
       } finally {
-        setUploadingBulk(false);
+        e.target.value = "";
       }
     };
 
     reader.readAsText(file);
   };
 
+  const cancelPendingBulkFile = () => setPendingBulkFile(null);
+
+  // Step 2: only after the admin reviews the preview and explicitly confirms
+  // does the data actually get submitted.
+  const confirmBulkUpload = async () => {
+    if (!pendingBulkFile) return;
+
+    setUploadingBulk(true);
+    try {
+      const response = await authFetch("/api/elections/voters/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          electionId: selectedElection,
+          voters: pendingBulkFile.rows,
+          deliveryMethod: bulkDeliveryMethod,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        let message = `Successfully uploaded ${data.data.successful} voters!`;
+        const notifications = [];
+
+        if (data.data.emailsSent !== undefined) {
+          notifications.push(
+            `Emails: ${data.data.emailsSent} sent${data.data.emailsFailed > 0 ? ` (${data.data.emailsFailed} failed)` : ""}`,
+          );
+        }
+        if (data.data.smsSent !== undefined) {
+          notifications.push(
+            `SMS: ${data.data.smsSent} sent${data.data.smsFailed > 0 ? ` (${data.data.smsFailed} failed)` : ""}`,
+          );
+        }
+        if (notifications.length > 0) {
+          message += ` | ${notifications.join(" | ")}`;
+        }
+
+        toast.success(message);
+        setUploadResults(data.data);
+        setPendingBulkFile(null);
+        fetchVoters();
+      } else {
+        toast.error(data.error || "Failed to upload voters");
+      }
+    } catch (error) {
+      console.error("Bulk upload error:", error);
+      toast.error("Failed to upload voters");
+    } finally {
+      setUploadingBulk(false);
+    }
+  };
+
+  // Undo: removes every voter from a just-completed upload, in case the
+  // mistake wasn't caught at the preview step.
+  const undoBulkUpload = async () => {
+    if (!uploadResults?.batchId || !selectedElection) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: "Undo This Upload",
+      message: `Remove all ${uploadResults.successful} voter(s) just added? Voters who have already voted will be kept.`,
+      type: "danger",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setUndoingBatch(true);
+        try {
+          const response = await authFetch(
+            `/api/elections/voters/bulk?batchId=${uploadResults.batchId}&electionId=${selectedElection}`,
+            { method: "DELETE" }
+          );
+          const data = await response.json();
+          if (response.ok) {
+            toast.success(data.message || "Upload undone");
+            setUploadResults(null);
+            fetchVoters();
+          } else {
+            toast.error(data.error || "Failed to undo upload");
+          }
+        } catch (error) {
+          console.error("Undo bulk upload error:", error);
+          toast.error("Failed to undo upload");
+        } finally {
+          setUndoingBatch(false);
+        }
+      },
+    });
+  };
+
   const downloadCredentials = () => {
     if (!uploadResults || !uploadResults.voters) return;
 
     const csv = [
-      "Name,Email,Token,Password",
+      "Name,Email,Student Number,Password",
       ...uploadResults.voters.map(
-        (v: any) => `${v.name},${v.email || ""},${v.token},${v.password}`,
+        (v: any) => `${v.name},${v.email || ""},${v.voterId || ""},${v.password}`,
       ),
     ].join("\n");
 
@@ -469,7 +573,7 @@ export default function VotersPage() {
     (voter) =>
       voter.name.toLowerCase().includes(search.toLowerCase()) ||
       voter.email?.toLowerCase().includes(search.toLowerCase()) ||
-      voter.token.toLowerCase().includes(search.toLowerCase()),
+      voter.voterId?.toLowerCase().includes(search.toLowerCase()),
   );
 
   return (
@@ -529,13 +633,15 @@ export default function VotersPage() {
                     );
                     return;
                   }
+                  setPendingBulkFile(null);
+                  setUploadResults(null);
                   setShowBulkModal(true);
                 }}
                 disabled={isElectionEnded()}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
                   isElectionEnded()
                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : "bg-blue-600 text-white hover:bg-blue-700"
+                    : "bg-[#1C2338] text-white hover:bg-[#1C2338]"
                 }`}
               >
                 <Upload size={18} />
@@ -614,7 +720,7 @@ export default function VotersPage() {
                             voter.phone,
                           )
                         }
-                        className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="p-2 text-[#1C2338] hover:bg-blue-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={
                           voter.hasVoted ||
                           (!voter.email && !voter.phone) ||
@@ -629,7 +735,7 @@ export default function VotersPage() {
                         }
                       >
                         {resendingCredentials === voter._id ? (
-                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                          <div className="w-4 h-4 border-2 border-[#1C2338] border-t-transparent rounded-full animate-spin"></div>
                         ) : (
                           <Send size={16} />
                         )}
@@ -638,7 +744,7 @@ export default function VotersPage() {
                         onClick={() => handleEdit(voter)}
                         className="p-2 text-[#d4af37] hover:bg-green-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={true}
-                        title="Voter cannot be edited after being added. Use Resend Token to update phone number."
+                        title="Voter cannot be edited after being added. Use Resend Credentials to update phone number."
                       >
                         <Edit size={16} />
                       </button>
@@ -659,9 +765,9 @@ export default function VotersPage() {
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">Token:</span>
+                      <span className="text-gray-500">Student Number:</span>
                       <code className="px-2 py-1 bg-gray-100 text-[#d4af37] rounded text-xs font-mono">
-                        {voter.token}
+                        {voter.voterId || "—"}
                       </code>
                     </div>
 
@@ -714,7 +820,7 @@ export default function VotersPage() {
                       Phone
                     </th>
                     <th className="text-left py-4 px-6 text-sm font-semibold text-black">
-                      Token
+                      Student Number
                     </th>
                     <th className="text-left py-4 px-6 text-sm font-semibold text-black">
                       Status
@@ -783,7 +889,7 @@ export default function VotersPage() {
                         </td>
                         <td className="py-4 px-6">
                           <code className="px-2 py-1 bg-gray-100 text-[#d4af37] rounded text-sm font-mono">
-                            {voter.token}
+                            {voter.voterId || "—"}
                           </code>
                         </td>
                         <td className="py-4 px-6">
@@ -821,7 +927,7 @@ export default function VotersPage() {
                                   voter.phone,
                                 )
                               }
-                              className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="p-2 text-[#1C2338] hover:bg-blue-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                               disabled={
                                 voter.hasVoted ||
                                 (!voter.email && !voter.phone) ||
@@ -836,7 +942,7 @@ export default function VotersPage() {
                               }
                             >
                               {resendingCredentials === voter._id ? (
-                                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                <div className="w-4 h-4 border-2 border-[#1C2338] border-t-transparent rounded-full animate-spin"></div>
                               ) : (
                                 <Send size={18} />
                               )}
@@ -845,7 +951,7 @@ export default function VotersPage() {
                               onClick={() => handleEdit(voter)}
                               className="p-2 text-[#d4af37] hover:bg-green-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                               disabled={true}
-                              title="Voter cannot be edited after being added. Use Resend Token to update phone number."
+                              title="Voter cannot be edited after being added. Use Resend Credentials to update phone number."
                             >
                               <Edit size={18} />
                             </button>
@@ -927,10 +1033,11 @@ export default function VotersPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">
-                      Voter ID
+                      Student Number *
                     </label>
                     <input
                       type="text"
+                      required
                       value={formData.voterId}
                       onChange={(e) =>
                         setFormData({ ...formData, voterId: e.target.value })
@@ -1069,106 +1176,204 @@ export default function VotersPage() {
       {/* Bulk Upload Modal */}
       {showBulkModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="bg-[#d4af37] text-white px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between rounded-t-lg">
               <h3 className="text-lg font-semibold">Bulk Upload Voters</h3>
             </div>
             <div className="p-6">
-              <div className="mb-6">
-                <p className="text-sm text-gray-600 mb-4">
-                  Upload a CSV file with voter information. The file should have
-                  the following columns:
-                </p>
-
-                <button
-                  onClick={downloadTemplate}
-                  className="text-sm text-[#d4af37] hover:text-[#d4af37] flex items-center gap-2 font-medium"
-                >
-                  <Download size={16} />
-                  Download CSV Template (with instructions)
-                </button>
-              </div>
-
-              {/* Delivery Method Selection for Bulk Upload */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Send Credentials Via <span className="text-red-500">*</span>
-                </label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="bulkDeliveryMethod"
-                      value="email"
-                      checked={bulkDeliveryMethod === "email"}
-                      onChange={(e) =>
-                        setBulkDeliveryMethod(
-                          e.target.value as "email" | "sms" | "both",
-                        )
-                      }
-                      className="w-4 h-4 text-[#d4af37]"
-                    />
-                    <span className="text-sm text-gray-700">Email Only</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="bulkDeliveryMethod"
-                      value="sms"
-                      checked={bulkDeliveryMethod === "sms"}
-                      onChange={(e) =>
-                        setBulkDeliveryMethod(
-                          e.target.value as "email" | "sms" | "both",
-                        )
-                      }
-                      className="w-4 h-4 text-[#d4af37]"
-                    />
-                    <span className="text-sm text-gray-700">SMS Only</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="bulkDeliveryMethod"
-                      value="both"
-                      checked={bulkDeliveryMethod === "both"}
-                      onChange={(e) =>
-                        setBulkDeliveryMethod(
-                          e.target.value as "email" | "sms" | "both",
-                        )
-                      }
-                      className="w-4 h-4 text-[#d4af37]"
-                    />
-                    <span className="text-sm text-gray-700">
-                      Both Email & SMS
-                    </span>
-                  </label>
+              {selectedElectionData && (
+                <div className="mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                  Uploading to: <strong>{selectedElectionData.title}</strong>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  {bulkDeliveryMethod === "email" &&
-                    "Credentials will be sent via email only. Voters must have email addresses."}
-                  {bulkDeliveryMethod === "sms" &&
-                    "Credentials will be sent via SMS only. Voters must have phone numbers."}
-                  {bulkDeliveryMethod === "both" &&
-                    "Credentials will be sent via both email and SMS if available."}
-                </p>
-              </div>
+              )}
 
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                {uploadingBulk ? (
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-16 h-16 border-4 border-green-200 border-t-[#d4af37] rounded-full animate-spin"></div>
-                    <div>
-                      <p className="text-gray-900 font-medium mb-1">
-                        Uploading voters...
+              {/* ── Results (after a confirmed upload) ── */}
+              {uploadResults ? (
+                <div className="space-y-4">
+                  <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-sm font-semibold text-green-800">
+                      {uploadResults.successful} voter(s) uploaded successfully
+                    </p>
+                    {uploadResults.failed > 0 && (
+                      <p className="text-xs text-red-600 mt-1">
+                        {uploadResults.failed} row(s) failed — see them in the voter list errors.
                       </p>
-                      <p className="text-sm text-gray-500">
-                        Please wait while we process your CSV file and send
-                        emails
+                    )}
+                  </div>
+
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-red-800">Uploaded the wrong file?</p>
+                      <p className="text-xs text-red-600 mt-0.5">
+                        Undo removes every voter just added by this upload. Anyone who has already
+                        voted will be kept.
                       </p>
                     </div>
+                    <button
+                      onClick={undoBulkUpload}
+                      disabled={undoingBatch || !uploadResults.batchId}
+                      className="shrink-0 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {undoingBatch ? "Undoing…" : "Undo This Upload"}
+                    </button>
                   </div>
-                ) : (
-                  <>
+
+                  <div className="flex gap-3 justify-end pt-2">
+                    <button
+                      onClick={() => {
+                        setShowBulkModal(false);
+                        setUploadResults(null);
+                      }}
+                      className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              ) : pendingBulkFile ? (
+                /* ── Preview (parsed, not yet submitted) ── */
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{pendingBulkFile.fileName}</p>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      {pendingBulkFile.rows.length} voter{pendingBulkFile.rows.length !== 1 ? "s" : ""} detected.
+                      Review the preview below before confirming.
+                    </p>
+                  </div>
+
+                  {pendingBulkFile.rows.some((r) => r.phone && /0{4,}$/.test(r.phone)) && (
+                    <div className="px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                      Some phone numbers end in several zeros — this can happen when a spreadsheet
+                      app mangles numeric columns. Double-check them before confirming.
+                    </div>
+                  )}
+
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            {Object.keys(pendingBulkFile.rows[0]).map((h) => (
+                              <th key={h} className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {pendingBulkFile.rows.slice(0, 10).map((row, i) => (
+                            <tr key={i}>
+                              {Object.keys(pendingBulkFile.rows[0]).map((h) => (
+                                <td key={h} className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                                  {row[h] || <span className="text-gray-300">—</span>}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {pendingBulkFile.rows.length > 10 && (
+                      <p className="text-xs text-gray-400 text-center py-2 bg-gray-50 border-t border-gray-100">
+                        + {pendingBulkFile.rows.length - 10} more row(s) not shown
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Delivery Method Selection for Bulk Upload */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Send Credentials Via <span className="text-red-500">*</span>
+                    </label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="bulkDeliveryMethod"
+                          value="email"
+                          checked={bulkDeliveryMethod === "email"}
+                          onChange={(e) =>
+                            setBulkDeliveryMethod(
+                              e.target.value as "email" | "sms" | "both",
+                            )
+                          }
+                          className="w-4 h-4 text-[#d4af37]"
+                        />
+                        <span className="text-sm text-gray-700">Email Only</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="bulkDeliveryMethod"
+                          value="sms"
+                          checked={bulkDeliveryMethod === "sms"}
+                          onChange={(e) =>
+                            setBulkDeliveryMethod(
+                              e.target.value as "email" | "sms" | "both",
+                            )
+                          }
+                          className="w-4 h-4 text-[#d4af37]"
+                        />
+                        <span className="text-sm text-gray-700">SMS Only</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="bulkDeliveryMethod"
+                          value="both"
+                          checked={bulkDeliveryMethod === "both"}
+                          onChange={(e) =>
+                            setBulkDeliveryMethod(
+                              e.target.value as "email" | "sms" | "both",
+                            )
+                          }
+                          className="w-4 h-4 text-[#d4af37]"
+                        />
+                        <span className="text-sm text-gray-700">
+                          Both Email & SMS
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 justify-end pt-2">
+                    <button
+                      onClick={cancelPendingBulkFile}
+                      disabled={uploadingBulk}
+                      className="px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Choose a Different File
+                    </button>
+                    <button
+                      onClick={confirmBulkUpload}
+                      disabled={uploadingBulk}
+                      className="px-5 py-2 bg-[#d4af37] text-white font-medium rounded-lg hover:bg-[#c19d2f] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {uploadingBulk
+                        ? "Uploading…"
+                        : `Confirm & Upload ${pendingBulkFile.rows.length} Voter${pendingBulkFile.rows.length !== 1 ? "s" : ""}`}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ── File picker (nothing chosen yet) ── */
+                <div className="space-y-6">
+                  <div>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Upload a CSV file with voter information. The file should have
+                      the following columns:
+                    </p>
+
+                    <button
+                      onClick={downloadTemplate}
+                      className="text-sm text-[#d4af37] hover:text-[#d4af37] flex items-center gap-2 font-medium"
+                    >
+                      <Download size={16} />
+                      Download CSV Template (with instructions)
+                    </button>
+                  </div>
+
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
                     <Upload className="mx-auto text-gray-400 mb-4" size={48} />
                     <p className="text-gray-600 mb-4">
                       Click to upload or drag and drop
@@ -1176,34 +1381,28 @@ export default function VotersPage() {
                     <input
                       type="file"
                       accept=".csv"
-                      onChange={handleBulkUpload}
+                      onChange={handleFileSelect}
                       className="hidden"
                       id="csv-upload"
-                      disabled={uploadingBulk}
                     />
                     <label
                       htmlFor="csv-upload"
-                      className="inline-block px-6 py-3 bg-[#d4af37] text-white rounded-lg hover:bg-[#d4af37] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="inline-block px-6 py-3 bg-[#d4af37] text-white rounded-lg hover:bg-[#d4af37] cursor-pointer"
                     >
                       Choose CSV File
                     </label>
-                  </>
-                )}
-              </div>
+                  </div>
 
-              <div className="flex gap-3 justify-end pt-6">
-                <button
-                  onClick={() => {
-                    setShowBulkModal(false);
-                    setUploadResults(null);
-                    setUploadingBulk(false);
-                  }}
-                  disabled={uploadingBulk}
-                  className="px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Close
-                </button>
-              </div>
+                  <div className="flex gap-3 justify-end pt-2">
+                    <button
+                      onClick={() => setShowBulkModal(false)}
+                      className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1269,7 +1468,7 @@ export default function VotersPage() {
                     setResendModalData({ ...resendModalData, editPhone: e.target.value })
                   }
                   placeholder="e.g. 0241234567"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#1C2338] outline-none"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   A new password will be generated and sent to this number
@@ -1284,7 +1483,7 @@ export default function VotersPage() {
                 </button>
                 <button
                   onClick={doResendCredentials}
-                  className="flex-1 px-4 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium"
+                  className="flex-1 px-4 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#1C2338] transition text-sm font-medium"
                 >
                   Resend Credentials
                 </button>

@@ -115,13 +115,14 @@ export async function sendSms({
 export async function sendVoterCredentialsSms(
   phone: string,
   name: string,
-  token: string,
+  studentId: string,
   password: string,
   electionTitle: string,
   startDate?: Date,
   endDate?: Date,
+  secureLink?: string,
+  electionAlias?: string,
 ): Promise<boolean> {
-  const loginUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
   const formatDate = (date: Date) => {
     return new Date(date).toLocaleString("en-GB", {
       day: "2-digit",
@@ -137,17 +138,29 @@ export async function sendVoterCredentialsSms(
   if (startDate && endDate) {
     dateInfo = `\n\nVoting Period:\n${formatDate(startDate)} - ${formatDate(endDate)}`;
   }
-  const message = `Hello ${name},
+  const electionLabel = electionAlias ? `${electionTitle} (${electionAlias})` : electionTitle;
+  const closesInfo = endDate ? ` before ${formatDate(endDate)}` : "";
 
-Your voting credentials for ${electionTitle}:
+  const message = secureLink
+    ? `Hello ${name},
 
-Token: ${token}
+You are invited to vote in ${electionLabel}. Click the secure link below, then enter your student number and password to continue${closesInfo}:
+
+${secureLink}
+
+Student Number: ${studentId}
+Password: ${password}
+
+This link is unique to you, cannot be shared, and expires automatically.${dateInfo}
+`
+    : `Hello ${name},
+
+You are invited to vote in ${electionLabel}.
+
+Student Number: ${studentId}
 Password: ${password}${dateInfo}
 
-Vote at: ${loginUrl}/election/login
-
-Keep these credentials safe.
-
+Contact your election administrator for your secure voting link.
 `;
 
   const result = await sendSms({
