@@ -121,8 +121,19 @@ const Voter: Model<IVoter> = mongoose.model<IVoter>('Voter', VoterSchema);
 
 // Drop any stale global unique indexes (e.g. on email/phone alone) that would
 // incorrectly block the same voter from appearing in multiple elections.
-Voter.syncIndexes().catch((err) =>
-  console.error('Voter.syncIndexes error:', err)
-);
+// This module is imported (and this code runs) before connectDB()'s
+// mongoose.connect() has necessarily resolved — with bufferCommands: false,
+// calling syncIndexes() before the connection is open throws (no db handle
+// yet), so wait for the 'connected' event when that's the case.
+function syncVoterIndexes() {
+  Voter.syncIndexes().catch((err) =>
+    console.error('Voter.syncIndexes error:', err)
+  );
+}
+if (mongoose.connection.readyState === 1) {
+  syncVoterIndexes();
+} else {
+  mongoose.connection.once('connected', syncVoterIndexes);
+}
 
 export default Voter;

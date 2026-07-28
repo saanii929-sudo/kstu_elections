@@ -18,6 +18,13 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
         user: process.env.SMTP_USERNAME,
         pass: process.env.SMTP_PASSWORD,
       },
+      // nodemailer's defaults are 2 minutes each — if the SMTP host is
+      // unreachable (network egress blocked, wrong host, etc.) that stalls
+      // whatever request triggered the email for up to 2 minutes per
+      // attempt. Fail fast instead.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
     });
 
     await transporter.sendMail({
@@ -29,6 +36,7 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
     });
     return true;
   } catch (error: any) {
+    console.error('sendEmail failed:', error?.message || error);
     return false;
   }
 }

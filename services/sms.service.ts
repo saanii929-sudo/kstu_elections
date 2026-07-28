@@ -79,11 +79,23 @@ export async function sendSms({
       }
     }
     const apiUrl = `https://sms.arkesel.com/sms/api?action=send-sms&api_key=${apiKey}&to=${encodeURIComponent(phoneNumber)}&from=${encodeURIComponent(senderId)}&sms=${encodeURIComponent(message)}`;
-    
-    const response = await fetch(apiUrl, {
-      method: "GET",
-    });
-    
+
+    // A plain fetch() has no timeout — if the SMS gateway is unreachable
+    // (network egress blocked, DNS black hole, etc.) this would otherwise
+    // hang for the OS's default TCP timeout, stalling whatever request
+    // triggered it for minutes.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, {
+        method: "GET",
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(
@@ -105,9 +117,17 @@ export async function sendSms({
       };
     }
   } catch (error: any) {
+    const timedOut = error?.name === "AbortError";
+    // fetch() wraps the real network error (DNS failure, connection reset,
+    // etc.) in error.cause — surface it so "fetch failed" isn't the entire
+    // diagnostic.
+    const detail = timedOut
+      ? "Request timed out after 15s"
+      : error?.cause?.message || error.message || "Failed to send SMS";
+    console.error("sendSms failed:", detail);
     return {
       success: false,
-      error: error.message || "Failed to send SMS",
+      error: detail,
     };
   }
 }
