@@ -11,6 +11,9 @@ export interface IAdmin extends Document {
   // Elections this admin has been granted scoped access to — only
   // meaningful when role is 'electionAdmin'.
   assignedElections: mongoose.Types.ObjectId[];
+  // Browsers that have completed OTP verification recently — login from one
+  // of these skips the OTP step until its own expiry (see lib/deviceTrust.ts).
+  trustedDevices: { token: string; expiresAt: Date }[];
   resetPasswordToken?: string;
   resetPasswordExpiry?: Date;
   createdAt: Date;
@@ -52,6 +55,13 @@ const AdminSchema: Schema = new Schema(
       default: 'active',
     },
     assignedElections: [{ type: Schema.Types.ObjectId, ref: 'Election' }],
+    trustedDevices: [
+      {
+        _id: false,
+        token: { type: String, required: true },
+        expiresAt: { type: Date, required: true },
+      },
+    ],
     resetPasswordToken: {
       type: String,
     },

@@ -5,6 +5,7 @@ import { sendAdminOtpSms } from '@/services/sms.service';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { peekPendingLogin, regenerateOtp, consumePendingLogin } from '@/lib/adminOtp';
 import { createSession } from '@/lib/sessionStore';
+import { trustDevice } from '@/lib/deviceTrust';
 
 // Resend the login verification code
 export async function POST(req: NextRequest) {
@@ -91,10 +92,18 @@ export async function PUT(req: NextRequest) {
 
     const token = generateToken({ ...record.tokenPayload, sid });
 
+    // Remember this browser for 7 days so it can skip OTP next time —
+    // only meaningful for Admin-model accounts (superadmin/electionAdmin).
+    let deviceToken: string | undefined;
+    if (payload.role === 'superadmin' || payload.role === 'electionAdmin') {
+      deviceToken = await trustDevice(String(payload.id));
+    }
+
     return NextResponse.json({
       success: true,
       token,
       user: record.user,
+      ...(deviceToken ? { deviceToken } : {}),
     });
   } catch (error: any) {
     return NextResponse.json({ error: 'Failed to verify code' }, { status: 500 });

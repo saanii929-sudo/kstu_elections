@@ -4,9 +4,11 @@ import Admin from '@/models/Admin';
 import Organization from '@/models/Organization';
 import OrganizationAdmin from '@/models/OrganizationAdmin';
 import EventOrganizer from '@/models/EventOrganizer';
-import { verifyPassword } from '@/lib/auth';
+import { verifyPassword, generateToken } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { createPendingLogin, maskEmail, maskPhone } from '@/lib/adminOtp';
+import { isDeviceTokenValid } from '@/lib/deviceTrust';
+import { createSession } from '@/lib/sessionStore';
 import { sendEmail } from '@/lib/email';
 import { sendAdminOtpSms } from '@/services/sms.service';
 
@@ -25,7 +27,7 @@ export async function POST(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
-    const { email, password, userType } = body;
+    const { email, password, userType, deviceToken } = body;
     
     if (!email || !password || !userType) {
       return NextResponse.json(
@@ -126,6 +128,21 @@ export async function POST(req: NextRequest) {
     const isAdminModelRole = userType === 'admin' || userType === 'superadmin';
     const phone: string | undefined = isAdminModelRole ? (user as any).phone : undefined;
     const useSms = isAdminModelRole && !!phone;
+
+    // "Remember this device" — a browser that verified OTP within the last
+    // 7 days skips it on subsequent logins. Only applies to Admin-model
+    // accounts (superadmin/electionAdmin), per how often they log in.
+    if (isAdminModelRole && isDeviceTokenValid(user as any, deviceToken)) {
+      const sid = await createSession({
+        userId: String(user._id),
+        userType: String(role),
+        email: user.email,
+        userAgent: req.headers.get('user-agent') || undefined,
+        ip,
+      });
+      const sessionToken = generateToken({ ...tokenPayload, sid });
+      return NextResponse.json({ success: true, token: sessionToken, user: userResponse });
+    }
 
     // Password verified — now require a one-time code before issuing the session token.
     const { loginId, otp } = createPendingLogin(

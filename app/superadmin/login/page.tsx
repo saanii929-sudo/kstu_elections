@@ -61,10 +61,15 @@ export default function SuperAdminLogin() {
     return () => clearInterval(id);
   }, [resendCooldown]);
 
-  const completeLogin = (data: { token: string; user: Record<string, unknown> }) => {
+  const completeLogin = (data: { token: string; user: Record<string, unknown>; deviceToken?: string }) => {
     localStorage.setItem("token", data.token);
     localStorage.setItem("user", JSON.stringify(data.user));
     localStorage.setItem("tokenTimestamp", Date.now().toString());
+    // Deliberately NOT cleared on logout — this is what lets a "remembered"
+    // browser skip OTP on its next login within the 7-day window.
+    if (data.deviceToken) {
+      localStorage.setItem("adminDeviceToken", data.deviceToken);
+    }
 
     const role = data.user.role;
     if (role === "superadmin") {
@@ -90,6 +95,9 @@ export default function SuperAdminLogin() {
       // etc.) — the backend derives the actual role from the DB record, not
       // from this label; completeLogin() below routes by the real role.
       userType: "admin",
+      // If this browser verified OTP within the last 7 days, the server
+      // skips OTP entirely and logs in directly.
+      deviceToken: localStorage.getItem("adminDeviceToken") || undefined,
     };
 
     const loadingToast = toast.loading("Logging in...");
