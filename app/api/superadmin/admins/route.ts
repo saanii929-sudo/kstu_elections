@@ -8,6 +8,7 @@ import '@/models/Election';
 import { hashPassword } from '@/lib/auth';
 import { withAuth } from '@/middleware/auth';
 import { sendEmail } from '@/lib/email';
+import { sendAdminCredentialsSms } from '@/services/sms.service';
 import { logAudit } from '@/lib/auditLog';
 
 function generateSecurePassword(): string {
@@ -103,23 +104,30 @@ async function createAdmin(req: NextRequest) {
       assignedElections: role === 'electionAdmin' ? assignedElections : [],
     });
 
+    // Credentials go by SMS when a phone is on file, email otherwise —
+    // never both, matching the login-OTP delivery convention.
+    const credentialsSentVia: 'sms' | 'email' = phone ? 'sms' : 'email';
     try {
-      await sendEmail({
-        to: email,
-        subject: 'Your PawaVotes administrator account',
-        html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2>Welcome to PawaVotes</h2>
-          <p>Hello ${username},</p>
-          <p>An administrator account has been created for you with the role: <strong>${role}</strong>.</p>
-          <div style="background:#f3f4f6;padding:20px;border-radius:8px;margin:20px 0;">
-            <p><strong>Email:</strong> ${email}</p>
-            <p><strong>Password:</strong> ${generatedPassword}</p>
-          </div>
-          <p style="color:#dc2626;"><strong>Important:</strong> Change your password after first login.</p>
-        </div>`,
-      });
+      if (phone) {
+        await sendAdminCredentialsSms(phone, username, email, generatedPassword, role);
+      } else {
+        await sendEmail({
+          to: email,
+          subject: 'Your PawaVotes administrator account',
+          html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2>Welcome to PawaVotes</h2>
+            <p>Hello ${username},</p>
+            <p>An administrator account has been created for you with the role: <strong>${role}</strong>.</p>
+            <div style="background:#f3f4f6;padding:20px;border-radius:8px;margin:20px 0;">
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Password:</strong> ${generatedPassword}</p>
+            </div>
+            <p style="color:#dc2626;"><strong>Important:</strong> Change your password after first login.</p>
+          </div>`,
+        });
+      }
     } catch {
-      // Non-fatal — the account still exists even if the welcome email fails
+      // Non-fatal — the account still exists even if credential delivery fails
     }
 
     const actor = (req as any).user;
@@ -128,14 +136,14 @@ async function createAdmin(req: NextRequest) {
       action: 'admin.create',
       targetType: 'Admin',
       targetId: String(admin._id),
-      details: { username, email, role },
+      details: { username, email, role, credentialsSentVia },
     });
 
     const adminData: any = admin.toObject();
     delete adminData.password;
 
     return NextResponse.json(
-      { success: true, message: 'Administrator created successfully', data: adminData },
+      { success: true, message: 'Administrator created successfully', data: adminData, credentialsSentVia },
       { status: 201 }
     );
   } catch (error: any) {

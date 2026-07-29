@@ -277,6 +277,39 @@ export async function sendAdminOtpSms(phone: string, otp: string): Promise<boole
   return result.success;
 }
 
+// New administrator account credentials — sent instead of email when
+// superadmin provides a phone number for the new account.
+export async function sendAdminCredentialsSms(
+  phone: string,
+  username: string,
+  email: string,
+  password: string,
+  role: string,
+): Promise<boolean> {
+  const message = `Hello ${username},
+
+Your PawaVotes administrator account (${role}) has been created.
+
+Email: ${email}
+Password: ${password}
+
+Change your password after first login. Keep these credentials safe.`;
+
+  const result = await sendSms({
+    to: phone,
+    message,
+    senderId: "KsTUEvote",
+  });
+
+  if (result.success) {
+    console.log("Admin credentials SMS sent successfully to:", phone);
+  } else {
+    console.error("Failed to send admin credentials SMS:", result.error);
+  }
+
+  return result.success;
+}
+
 // NOTE: mNotify's balance endpoint wasn't part of the /sms/quick and
 // /sms/group docs this migration was based on — this is our best-effort
 // mapping to mNotify's documented `GET /api/balance/sms` endpoint and

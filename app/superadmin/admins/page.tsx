@@ -155,7 +155,9 @@ export default function AdministratorsPage() {
           title: "Success",
           message: editingAdmin
             ? "Administrator updated successfully."
-            : "Administrator created — login credentials were emailed to them.",
+            : data.credentialsSentVia === "sms"
+              ? "Administrator created — login credentials were sent via SMS."
+              : "Administrator created — login credentials were emailed to them.",
           type: "success",
         });
         closeModal();

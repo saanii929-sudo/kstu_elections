@@ -81,6 +81,7 @@ async function run() {
   console.log('📋 Credentials:');
   console.log(`   Email   : ${SUPERADMIN.email}`);
   console.log(`   Password: ${SUPERADMIN.password}`);
+  console.log(`   Password: ${SUPERADMIN.phone}`);
   console.log('\n🚀 Login at: /superadmin/login\n');
 
   await mongoose.disconnect();

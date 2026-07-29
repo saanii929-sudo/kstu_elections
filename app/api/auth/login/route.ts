@@ -130,8 +130,11 @@ export async function POST(req: NextRequest) {
     const useSms = isAdminModelRole && !!phone;
 
     // "Remember this device" — a browser that verified OTP within the last
-    // 7 days skips it on subsequent logins. Only applies to Admin-model
-    // accounts (superadmin/electionAdmin), per how often they log in.
+    // 7 days skips it on subsequent logins. Checked before the phone
+    // requirement below: a trusted device needs no OTP at all, so it
+    // shouldn't be blocked even if the phone was later removed. Only
+    // applies to Admin-model accounts (superadmin/electionAdmin), per how
+    // often they log in.
     if (isAdminModelRole && isDeviceTokenValid(user as any, deviceToken)) {
       const sid = await createSession({
         userId: String(user._id),
@@ -142,6 +145,18 @@ export async function POST(req: NextRequest) {
       });
       const sessionToken = generateToken({ ...tokenPayload, sid });
       return NextResponse.json({ success: true, token: sessionToken, user: userResponse });
+    }
+
+    // electionAdmin OTPs always go by SMS, never email — they log in far
+    // more often day-to-day than superadmin, and outbound SMTP has proven
+    // unreliable on some deployments (blocked ports), so email isn't a safe
+    // fallback for this role. A missing phone is a hard stop, not a
+    // silent fall-through to a delivery channel that may not work.
+    if (role === 'electionAdmin' && !phone) {
+      return NextResponse.json(
+        { error: 'This account has no phone number on file. Ask your superadmin to add one before you can log in.' },
+        { status: 400 }
+      );
     }
 
     // Password verified — now require a one-time code before issuing the session token.
