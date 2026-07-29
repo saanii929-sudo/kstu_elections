@@ -20,12 +20,14 @@ const SUPERADMIN = {
   username: 'SuperAdmin',
   email: 'saanii929@gmail.com',
   password: 'Iddi1234!',
+  phone: "0509960632",
 };
 
 const AdminSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, trim: true },
     email:    { type: String, required: true, unique: true, lowercase: true, trim: true },
+    password: { type: String, required: true },
     password: { type: String, required: true },
     role:     { type: String, enum: ['superadmin', 'admin', 'helpdesk'], default: 'admin' },
     status:   { type: String, enum: ['active', 'inactive'], default: 'active' },
@@ -59,6 +61,7 @@ async function run() {
           role: 'superadmin',
           status: 'active',
           username: SUPERADMIN.username,
+          phone: SUPERADMIN.phone,
         },
       }
     );
@@ -68,6 +71,7 @@ async function run() {
       username: SUPERADMIN.username,
       email:    SUPERADMIN.email,
       password: hashed,
+      phone:    SUPERADMIN.phone,
       role:     'superadmin',
       status:   'active',
     });
