@@ -2,7 +2,14 @@
 
 import Image from "next/image";
 import { motion } from "framer-motion";
-import { Mail, Lock, Eye, EyeOff, ShieldCheck, CheckCircle2 } from "lucide-react";
+import {
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  CheckCircle2,
+} from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState, useEffect } from "react";
@@ -78,7 +85,10 @@ export default function Home() {
     return () => clearInterval(id);
   }, [resendCooldown]);
 
-  const completeLogin = (data: { token: string; user: { eventType?: string; [key: string]: unknown } }) => {
+  const completeLogin = (data: {
+    token: string;
+    user: { eventType?: string; [key: string]: unknown };
+  }) => {
     localStorage.setItem("token", data.token);
     localStorage.setItem("user", JSON.stringify(data.user));
     localStorage.setItem("tokenTimestamp", Date.now().toString());
@@ -284,6 +294,9 @@ export default function Home() {
                 <h1 className="font-bold text-[#1C2338] text-lg">
                   Kumasi Technical University
                 </h1>
+                <h2 className="font-bold text-[#D4AF37] text-sm">
+                  Electronic Voting System
+                </h2>
               </div>
 
               <form className="space-y-5" onSubmit={handleSubmit}>
@@ -333,7 +346,10 @@ export default function Home() {
                 {/* Actions */}
                 <div className="flex items-center justify-between text-sm">
                   <label className="flex items-center gap-2 text-gray-600">
-                    <input type="checkbox" className="rounded border-gray-300" />
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300"
+                    />
                     Remember me
                   </label>
                   <a
@@ -370,13 +386,19 @@ export default function Home() {
                 <div className="w-14 h-14 bg-white/15 rounded-full flex items-center justify-center mx-auto mb-3">
                   <ShieldCheck className="text-white" size={28} />
                 </div>
-                <h2 className="text-lg font-bold text-white">Verify Your Login</h2>
-                <p className="text-sm text-gray-300 mt-1">Confirm your identity to continue</p>
+                <h2 className="text-lg font-bold text-white">
+                  Verify Your Login
+                </h2>
+                <p className="text-sm text-gray-300 mt-1">
+                  Confirm your identity to continue
+                </p>
               </div>
 
               <div className="px-8 py-6">
                 <div className="bg-gray-50 rounded-xl p-4 mb-6 text-center">
-                  <p className="text-xs text-gray-500 mb-1">A 6-digit code was sent to</p>
+                  <p className="text-xs text-gray-500 mb-1">
+                    A 6-digit code was sent to
+                  </p>
                   <p className="text-sm font-semibold text-gray-800">
                     {maskedEmail || "your registered email"}
                   </p>
