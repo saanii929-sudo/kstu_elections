@@ -257,10 +257,11 @@ Keep these credentials safe.
   return result.success;
 }
 
-// Admin/electionAdmin login OTP — used instead of email when the account
-// has a phone number on file.
+// Login OTP for any account type that has opted into SMS delivery
+// (organization, admin, superadmin, electionAdmin) — used instead of email
+// when the account has a phone number on file.
 export async function sendAdminOtpSms(phone: string, otp: string): Promise<boolean> {
-  const message = `Your PawaVotes admin verification code is: ${otp}\n\nIt expires in 10 minutes. Do not share this code.`;
+  const message = `Your PawaVotes verification code is: ${otp}\n\nIt expires in 10 minutes. Do not share this code.`;
 
   const result = await sendSms({
     to: phone,
@@ -269,9 +270,9 @@ export async function sendAdminOtpSms(phone: string, otp: string): Promise<boole
   });
 
   if (result.success) {
-    console.log("Admin OTP SMS sent successfully to:", phone);
+    console.log("Login OTP SMS sent successfully to:", phone);
   } else {
-    console.error("Failed to send admin OTP SMS:", result.error);
+    console.error("Failed to send login OTP SMS:", result.error);
   }
 
   return result.success;

@@ -126,8 +126,12 @@ export async function POST(req: NextRequest) {
     // get their OTP via SMS instead of email; every other user type is
     // unaffected.
     const isAdminModelRole = userType === 'admin' || userType === 'superadmin';
-    const phone: string | undefined = isAdminModelRole ? (user as any).phone : undefined;
-    const useSms = isAdminModelRole && !!phone;
+    // Organizations opted into the same phone-present -> SMS behavior.
+    // org-admin/event-organizer (a separate, Awards/Events-domain identity)
+    // are unaffected — only asked to extend this to organization accounts.
+    const smsEligibleRole = isAdminModelRole || userType === 'organization';
+    const phone: string | undefined = smsEligibleRole ? (user as any).phone : undefined;
+    const useSms = smsEligibleRole && !!phone;
 
     // "Remember this device" — a browser that verified OTP within the last
     // 7 days skips it on subsequent logins. Checked before the phone

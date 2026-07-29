@@ -35,7 +35,8 @@ export default function Home() {
   // OTP step state
   const [showOtp, setShowOtp] = useState(false);
   const [loginId, setLoginId] = useState("");
-  const [maskedEmail, setMaskedEmail] = useState("");
+  const [maskedContact, setMaskedContact] = useState("");
+  const [deliveryMethod, setDeliveryMethod] = useState<"email" | "sms">("email");
   const [otpDigits, setOtpDigits] = useState(["", "", "", "", "", ""]);
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -152,7 +153,8 @@ export default function Home() {
       if (response.ok && data.success && data.requiresOtp) {
         toast.dismiss(loadingToast);
         setLoginId(data.loginId);
-        setMaskedEmail(data.maskedEmail || "");
+        setMaskedContact(data.maskedContact || data.maskedEmail || "");
+        setDeliveryMethod(data.deliveryMethod === "sms" ? "sms" : "email");
         setOtpDigits(["", "", "", "", "", ""]);
         setResendCooldown(60);
         setShowOtp(true);
@@ -397,10 +399,10 @@ export default function Home() {
               <div className="px-8 py-6">
                 <div className="bg-gray-50 rounded-xl p-4 mb-6 text-center">
                   <p className="text-xs text-gray-500 mb-1">
-                    A 6-digit code was sent to
+                    A 6-digit code was sent {deliveryMethod === "sms" ? "via SMS to" : "to"}
                   </p>
                   <p className="text-sm font-semibold text-gray-800">
-                    {maskedEmail || "your registered email"}
+                    {maskedContact || (deliveryMethod === "sms" ? "your registered phone" : "your registered email")}
                   </p>
                 </div>
 
