@@ -14,7 +14,7 @@ async function updateAdmin(
 
     const { id } = await params;
     const body = await req.json();
-    const { username, email, role, status, password } = body;
+    const { username, email, phone, role, status, password, assignedElections } = body;
     const actor = (req as any).user;
 
     const existingAdmin = await Admin.findById(id);
@@ -38,8 +38,9 @@ async function updateAdmin(
     const updateData: any = {};
     if (username) updateData.username = username;
     if (email) updateData.email = email;
+    if (phone !== undefined) updateData.phone = phone;
     if (role) {
-      if (!['superadmin', 'admin', 'helpdesk'].includes(role)) {
+      if (!['superadmin', 'admin', 'helpdesk', 'electionAdmin'].includes(role)) {
         return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
       }
       updateData.role = role;
@@ -52,6 +53,18 @@ async function updateAdmin(
     }
     if (password) {
       updateData.password = await hashPassword(password);
+    }
+
+    const effectiveRole = role || existingAdmin.role;
+    if (assignedElections !== undefined) {
+      if (effectiveRole === 'electionAdmin' && (!Array.isArray(assignedElections) || assignedElections.length === 0)) {
+        return NextResponse.json({ error: 'At least one election must be assigned' }, { status: 400 });
+      }
+      updateData.assignedElections = assignedElections;
+    }
+    // Clear stale assignments if the role is being changed away from electionAdmin
+    if (role && role !== 'electionAdmin' && existingAdmin.role === 'electionAdmin') {
+      updateData.assignedElections = [];
     }
 
     const admin = await Admin.findByIdAndUpdate(id, updateData, {

@@ -13,7 +13,18 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 // clears it — the hydration pass below best-effort repopulates it from
 // MongoDB on module load, but in a multi-instance or fully serverless
 // deployment a revocation on one instance won't be visible to another.
-const revokedSids = new Set<string>();
+//
+// Cached on `global` (mirroring lib/mongodb.ts's connection cache) so a
+// Next.js dev-mode hot-reload of this module doesn't silently drop
+// revocations that were already hydrated/added this process.
+declare global {
+  var __revokedSids: Set<string> | undefined;
+}
+
+const revokedSids: Set<string> = global.__revokedSids || new Set<string>();
+if (!global.__revokedSids) {
+  global.__revokedSids = revokedSids;
+}
 
 export async function createSession(params: {
   userId: string;

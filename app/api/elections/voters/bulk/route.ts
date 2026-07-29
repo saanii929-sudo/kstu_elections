@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import connectDB from '@/lib/mongodb';
 import Voter from '@/models/Voter';
-import Election from '@/models/Election';
 import ElectionVote from '@/models/ElectionVote';
 import { verifyToken } from '@/lib/auth';
 import { hashPassword } from '@/lib/auth';
@@ -10,6 +9,7 @@ import { sendEmail } from '@/lib/email';
 import { sendVoterCredentialsSms } from '@/services/sms.service';
 import { generateVoterLinkHash, buildVoterLoginUrl } from '@/lib/voterLink';
 import { logAudit } from '@/lib/auditLog';
+import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 
 function scientificToDecimal(num: string): string {
   const numStr = String(num).trim();
@@ -241,7 +241,7 @@ export async function POST(req: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -259,10 +259,7 @@ export async function POST(req: NextRequest) {
     // so the whole upload can be undone as a unit if it was a mistake.
     const batchId = crypto.randomBytes(8).toString('hex');
 
-    const election = await Election.findOne({
-      _id: electionId,
-      organizationId: decoded.id,
-    });
+    const election = await getAccessibleElection(decoded, electionId);
 
     if (!election) {
       return NextResponse.json(
@@ -398,7 +395,8 @@ export async function POST(req: NextRequest) {
 
         votersToCreate.push({
           electionId,
-          organizationId: decoded.id,
+          // The election's real owning organization, not the acting admin's own id.
+          organizationId: election.organizationId,
           name: voterData.name,
           email: voterData.email || null,
           phone: phoneNumber,
@@ -580,7 +578,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -592,14 +590,13 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'batchId and electionId are required' }, { status: 400 });
     }
 
-    const election = await Election.findOne({ _id: electionId, organizationId: decoded.id });
+    const election = await getAccessibleElection(decoded, electionId);
     if (!election) {
       return NextResponse.json({ error: 'Election not found' }, { status: 404 });
     }
 
     const batchVoters = await Voter.find({
       electionId,
-      organizationId: decoded.id,
       importBatchId: batchId,
     });
 

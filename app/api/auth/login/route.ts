@@ -6,8 +6,9 @@ import OrganizationAdmin from '@/models/OrganizationAdmin';
 import EventOrganizer from '@/models/EventOrganizer';
 import { verifyPassword } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
-import { createPendingLogin, maskEmail } from '@/lib/adminOtp';
+import { createPendingLogin, maskEmail, maskPhone } from '@/lib/adminOtp';
 import { sendEmail } from '@/lib/email';
+import { sendAdminOtpSms } from '@/services/sms.service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -98,6 +99,9 @@ export async function POST(req: NextRequest) {
       eventType: role === 'organization' ? (user as any).eventType : undefined,
       organizationId: role === 'org-admin' ? primaryOrgId : undefined,
       assignedAwards: role === 'org-admin' ? primaryAssignedAwards : undefined,
+      assignedElections: role === 'electionAdmin'
+        ? ((user as any).assignedElections || []).map((e: any) => e.toString())
+        : undefined,
     };
 
     const userResponse = {
@@ -111,21 +115,38 @@ export async function POST(req: NextRequest) {
       organizationName: role === 'org-admin' ? primaryOrgName : undefined,
       assignedAwards: role === 'org-admin' ? primaryAssignedAwards : undefined,
       organizations: role === 'org-admin' ? allOrgs : undefined,
+      assignedElections: role === 'electionAdmin'
+        ? ((user as any).assignedElections || []).map((e: any) => e.toString())
+        : undefined,
     };
 
+    // Admin-model accounts (superadmin/electionAdmin) with a phone on file
+    // get their OTP via SMS instead of email; every other user type is
+    // unaffected.
+    const isAdminModelRole = userType === 'admin' || userType === 'superadmin';
+    const phone: string | undefined = isAdminModelRole ? (user as any).phone : undefined;
+    const useSms = isAdminModelRole && !!phone;
+
     // Password verified — now require a one-time code before issuing the session token.
-    const { loginId, otp } = createPendingLogin(user.email, tokenPayload, userResponse);
+    const { loginId, otp } = createPendingLogin(
+      user.email,
+      tokenPayload,
+      userResponse,
+      useSms ? { method: 'sms', contact: phone! } : undefined
+    );
 
-    const emailSent = await sendEmail({
-      to: user.email,
-      subject: 'Your PawaVotes verification code',
-      html: `<p>Your one-time verification code is:</p><h2 style="letter-spacing:4px;">${otp}</h2><p>This code expires in 10 minutes. If you did not attempt to log in, you can ignore this email.</p>`,
-      text: `Your PawaVotes verification code is ${otp}. It expires in 10 minutes.`,
-    });
+    const deliverySucceeded = useSms
+      ? await sendAdminOtpSms(phone!, otp)
+      : await sendEmail({
+          to: user.email,
+          subject: 'Your PawaVotes verification code',
+          html: `<p>Your one-time verification code is:</p><h2 style="letter-spacing:4px;">${otp}</h2><p>This code expires in 10 minutes. If you did not attempt to log in, you can ignore this email.</p>`,
+          text: `Your PawaVotes verification code is ${otp}. It expires in 10 minutes.`,
+        });
 
-    if (!emailSent) {
+    if (!deliverySucceeded) {
       return NextResponse.json(
-        { error: 'Failed to send verification code. Please try again.' },
+        { error: `Failed to send verification code${useSms ? ' via SMS' : ''}. Please try again.` },
         { status: 500 }
       );
     }
@@ -134,7 +155,10 @@ export async function POST(req: NextRequest) {
       success: true,
       requiresOtp: true,
       loginId,
-      maskedEmail: maskEmail(user.email),
+      deliveryMethod: useSms ? 'sms' : 'email',
+      maskedContact: useSms ? maskPhone(phone!) : maskEmail(user.email),
+      // Kept for backward compatibility with any existing consumer reading this directly.
+      maskedEmail: useSms ? undefined : maskEmail(user.email),
     });
   } catch (error: any) {
     return NextResponse.json(

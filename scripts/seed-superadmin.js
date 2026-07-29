@@ -17,8 +17,8 @@ const MONGODB_URI =
   process.env.MONGODB_URI || 'mongodb://localhost:27017/pawavotes';
 
 const SUPERADMIN = {
-  username: 'PawaVotesAdmin',
-  email: 'admin@pawavotes.com',
+  username: 'SuperAdmin',
+  email: 'saanii929@gmail.com',
   password: 'Iddi1234!',
 };
 

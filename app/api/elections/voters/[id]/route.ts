@@ -5,6 +5,7 @@ import Election from '@/models/Election';
 import { verifyToken } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { buildVoterLoginUrl } from '@/lib/voterLink';
+import { isElectionManager, electionOwnerMatch } from '@/lib/electionAccess';
 
 // Send voter credentials via email
 async function sendVoterCredentials(
@@ -161,7 +162,7 @@ export async function PUT(
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -172,7 +173,7 @@ export async function PUT(
     // Verify voter belongs to organization
     const voter = await Voter.findOne({
       _id: id,
-      organizationId: decoded.id,
+      ...electionOwnerMatch(decoded),
     });
 
     if (!voter) {
@@ -273,7 +274,7 @@ export async function DELETE(
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -282,7 +283,7 @@ export async function DELETE(
     // Verify voter belongs to organization
     const voter = await Voter.findOneAndDelete({
       _id: id,
-      organizationId: decoded.id,
+      ...electionOwnerMatch(decoded),
     });
 
     if (!voter) {

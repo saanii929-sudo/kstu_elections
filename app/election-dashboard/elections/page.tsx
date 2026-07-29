@@ -39,6 +39,8 @@ interface Election {
   _id: string;
   title: string;
   alias: string;
+  organizationId?: string;
+  organizationName?: string;
   startDate: string;
   endDate: string;
   status: "draft" | "active" | "ended";
@@ -54,6 +56,7 @@ interface Election {
   voterCount?: number;
   totalVotes?: number;
   approvalStatus?: "pending" | "approved" | "rejected";
+  resultsApprovalStatus?: "pending" | "approved" | "rejected";
 }
 
 const APPROVAL_BADGE: Record<string, string> = {
@@ -107,6 +110,9 @@ function formatTime(date: string) {
 export default function ElectionsPage() {
   const [elections, setElections] = useState<Election[]>([]);
   const [loading, setLoading] = useState(true);
+  // Election admins manage the elections assigned to them but don't create
+  // new ones — only superadmin does that.
+  const [isElectionAdmin, setIsElectionAdmin] = useState(false);
   // Only true until the very first fetch resolves — drives the full-page
   // skeleton. Subsequent refetches (search/filter/sort/page changes) use
   // `loading` alone so the toolbar (and the focused search input) never unmounts.
@@ -118,6 +124,9 @@ export default function ElectionsPage() {
     alias: "",
     startDate: "",
     endDate: "",
+    // Only meaningful for an electionAdmin creating a new election —
+    // an organization owner's own id is used server-side instead.
+    organizationId: "",
     showLiveResults: true,
     allowRevote: false,
     requireAllCategories: false,
@@ -168,6 +177,30 @@ export default function ElectionsPage() {
 
   useEffect(() => {
     fetchStats();
+  }, []);
+
+  // Superadmin approve/reject/reset-votes actions land in the DB
+  // immediately but this page had no way to notice — poll so those become
+  // visible without a manual reload (matches the pattern already used on
+  // the Results page).
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchElections();
+      fetchStats();
+    }, 15000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, statusFilter, dateFrom, dateTo, sortBy, sortDir, page]);
+
+  useEffect(() => {
+    const userData = localStorage.getItem("user");
+    if (userData) {
+      try {
+        setIsElectionAdmin(JSON.parse(userData).role === "electionAdmin");
+      } catch {
+        /* ignore */
+      }
+    }
   }, []);
 
   const fetchStats = async () => {
@@ -221,6 +254,11 @@ export default function ElectionsPage() {
     }
     setAliasError(null);
 
+    if (!editingElection && isElectionAdmin && !formData.organizationId) {
+      toast.error("Please select which organization this election belongs to");
+      return;
+    }
+
     try {
       const url = editingElection
         ? `/api/elections/${editingElection._id}`
@@ -234,6 +272,7 @@ export default function ElectionsPage() {
           alias: normalizedAlias,
           startDate: formData.startDate,
           endDate: formData.endDate,
+          ...(!editingElection && isElectionAdmin ? { organizationId: formData.organizationId } : {}),
           settings: {
             showLiveResults: formData.showLiveResults,
             allowRevote: formData.allowRevote,
@@ -244,6 +283,22 @@ export default function ElectionsPage() {
         }),
       });
       if (response.ok) {
+        const data = await response.json();
+        // A freshly-created election isn't in this session's token yet
+        // (electionAdmin access is scoped by the token, not a DB lookup) —
+        // swap in the new token so the rest of the session can manage it
+        // immediately, without logging out and back in.
+        if (data.token) {
+          localStorage.setItem("token", data.token);
+          const userData = localStorage.getItem("user");
+          if (userData) {
+            const user = JSON.parse(userData);
+            localStorage.setItem(
+              "user",
+              JSON.stringify({ ...user, assignedElections: [...(user.assignedElections || []), data.data._id] })
+            );
+          }
+        }
         toast.success(
           editingElection
             ? "Election updated successfully!"
@@ -280,6 +335,7 @@ export default function ElectionsPage() {
       alias: election.alias || "",
       startDate: new Date(election.startDate).toISOString().slice(0, 16),
       endDate: new Date(election.endDate).toISOString().slice(0, 16),
+      organizationId: election.organizationId || "",
       showLiveResults: election.settings.showLiveResults,
       allowRevote: election.settings.allowRevote,
       requireAllCategories: election.settings.requireAllCategories,
@@ -325,6 +381,7 @@ export default function ElectionsPage() {
       alias: "",
       startDate: "",
       endDate: "",
+      organizationId: availableOrgs.length === 1 ? availableOrgs[0].id : "",
       showLiveResults: true,
       allowRevote: false,
       requireAllCategories: false,
@@ -341,6 +398,7 @@ export default function ElectionsPage() {
       alias: "",
       startDate: "",
       endDate: "",
+      organizationId: election.organizationId || "",
       showLiveResults: election.settings.showLiveResults,
       allowRevote: election.settings.allowRevote,
       requireAllCategories: election.settings.requireAllCategories,
@@ -358,6 +416,17 @@ export default function ElectionsPage() {
   const scheduledCount = statsElections.filter((e) => getElectionStatus(e) === "scheduled").length;
   const draftCount = statsElections.filter((e) => getElectionStatus(e) === "draft").length;
   const closedCount = statsElections.filter((e) => getElectionStatus(e) === "closed").length;
+
+  // For an electionAdmin, the organizations they can create a new election
+  // under — derived from the elections already assigned to them (the API
+  // enforces this same restriction server-side; this is just for the picker).
+  const availableOrgs = (() => {
+    const map = new Map<string, string>();
+    for (const e of statsElections) {
+      if (e.organizationId) map.set(e.organizationId, e.organizationName || "Unknown organization");
+    }
+    return Array.from(map, ([id, name]) => ({ id, name }));
+  })();
 
   // Full-page skeleton only on first load
   if (initialLoading) {
@@ -443,17 +512,23 @@ export default function ElectionsPage() {
               </span>
             </div>
           </div>
-          <button
-            onClick={() => {
-              resetForm();
-              setEditingElection(null);
-              setShowModal(true);
-            }}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#D4AF37] text-white text-lg font-semibold rounded-xl hover:bg-[#d4af37] transition-colors shadow-sm whitespace-nowrap"
-          >
-            <Plus size={18} />
-            New Election
-          </button>
+          {isElectionAdmin && availableOrgs.length === 0 ? (
+            <p className="text-sm text-gray-400 max-w-xs text-right">
+              You don&apos;t have any elections assigned yet — ask your superadmin to assign one before creating a new election.
+            </p>
+          ) : (
+            <button
+              onClick={() => {
+                resetForm();
+                setEditingElection(null);
+                setShowModal(true);
+              }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#D4AF37] text-white text-lg font-semibold rounded-xl hover:bg-[#d4af37] transition-colors shadow-sm whitespace-nowrap"
+            >
+              <Plus size={18} />
+              New Election
+            </button>
+          )}
         </div>
 
         {/* Toolbar: search, filters, sort, view toggle */}
@@ -666,6 +741,14 @@ export default function ElectionsPage() {
                             {APPROVAL_LABEL[election.approvalStatus]}
                           </span>
                         )}
+                        {election.resultsApprovalStatus && election.resultsApprovalStatus !== "approved" && (
+                          <span
+                            className={`inline-block mt-1 ml-1.5 px-1.5 py-0.5 rounded text-xs font-semibold ${APPROVAL_BADGE[election.resultsApprovalStatus]}`}
+                            title="Super Admin review status for this election's results — informational only"
+                          >
+                            Results: {APPROVAL_LABEL[election.resultsApprovalStatus]}
+                          </span>
+                        )}
                       </div>
                       <ElectionStatusBadge election={election} />
                     </div>
@@ -818,6 +901,25 @@ export default function ElectionsPage() {
                 <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
                   Election Details
                 </p>
+
+                {!editingElection && isElectionAdmin && availableOrgs.length > 1 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                      Organization <span className="text-red-400">*</span>
+                    </label>
+                    <select
+                      required
+                      value={formData.organizationId}
+                      onChange={(e) => setFormData({ ...formData, organizationId: e.target.value })}
+                      className="w-full text-gray-900 dark:text-gray-100 bg-transparent dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none transition"
+                    >
+                      <option value="">Select an organization…</option>
+                      {availableOrgs.map((org) => (
+                        <option key={org.id} value={org.id}>{org.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
@@ -1124,6 +1226,22 @@ function ElectionsTable({
                   {election.alias && (
                     <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs font-mono font-semibold tracking-wide">
                       {election.alias}
+                    </span>
+                  )}
+                  {election.approvalStatus && election.approvalStatus !== "approved" && (
+                    <span
+                      className={`inline-block mt-0.5 ml-1.5 px-1.5 py-0.5 rounded text-xs font-semibold ${APPROVAL_BADGE[election.approvalStatus]}`}
+                      title="Super Admin oversight status — informational only, does not affect your ability to run this election"
+                    >
+                      {APPROVAL_LABEL[election.approvalStatus]}
+                    </span>
+                  )}
+                  {election.resultsApprovalStatus && election.resultsApprovalStatus !== "approved" && (
+                    <span
+                      className={`inline-block mt-0.5 ml-1.5 px-1.5 py-0.5 rounded text-xs font-semibold ${APPROVAL_BADGE[election.resultsApprovalStatus]}`}
+                      title="Super Admin review status for this election's results — informational only"
+                    >
+                      Results: {APPROVAL_LABEL[election.resultsApprovalStatus]}
                     </span>
                   )}
                 </td>

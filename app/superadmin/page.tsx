@@ -177,7 +177,7 @@ export default function SuperAdminDashboard() {
           </div>
           <div>
             <p className="text-xs font-semibold text-gray-800 leading-tight">SMS Credits</p>
-            <p className="text-[11px] text-gray-400">Arkesel gateway balance</p>
+            <p className="text-[11px] text-gray-400">mNotify gateway balance</p>
           </div>
         </div>
         {smsLoading ? (

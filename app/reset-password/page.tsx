@@ -42,7 +42,9 @@ function ResetPasswordContent() {
 
   const verifyToken = async () => {
     try {
-      const response = await fetch(`/api/auth/verify-reset-token?token=${token}`);
+      const response = await fetch(
+        `/api/auth/verify-reset-token?token=${token}`,
+      );
       const data = await response.json();
 
       if (response.ok && data.success) {
@@ -169,7 +171,8 @@ function ResetPasswordContent() {
               Invalid Reset Link
             </h1>
             <p className="mb-6 text-gray-600 text-sm">
-              This password reset link is invalid or has expired. Please request a new one.
+              This password reset link is invalid or has expired. Please request
+              a new one.
             </p>
             <button
               onClick={() => router.push("/forgot-password")}
@@ -233,22 +236,20 @@ function ResetPasswordContent() {
             animate="visible"
             className="w-full relative max-w-md rounded-2xl bg-white/95 p-8 shadow-2xl backdrop-blur"
           >
-            <div className="mb-8 py-6 flex justify-center items-center">
+            <div className="flex-col mb-3 flex justify-center items-center">
               <Image
                 src="/images/logo.png"
-                alt="Pawavotes"
-                width={70}
-                height={70}
-                className="absolute md:right-62 right-48"
+                alt="KsTU E-Vote"
+                width={100}
+                height={100}
               />
-              <span className="text-xl font-semibold absolute md:right-40 right-25 text-green-600">
-                Pawavotes
-              </span>
+              <h1 className="font-bold text-[#1C2338] text-lg">
+                Kumasi Technical University
+              </h1>
+              <h2 className="font-bold text-[#D4AF37] text-sm">
+                Electronic Voting System
+              </h2>
             </div>
-
-            <h1 className="mb-2 text-center text-2xl font-bold text-gray-900">
-              Reset Password
-            </h1>
             <p className="mb-8 text-center text-gray-600 text-sm">
               Enter your new password below
             </p>
@@ -267,17 +268,17 @@ function ResetPasswordContent() {
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full rounded-lg border border-gray-300 py-3 pl-11 pr-11 text-sm focus:border-green-600 focus:outline-none focus:ring-2 focus:ring-green-600/20"
+                    className="w-full rounded-lg border border-[#D4AF37] py-3 pl-11 pr-11 text-sm focus:border-[#D4AF37] focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#D4AF37] hover:text-[#D4AF37]"
                   >
                     {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-[#D4AF37] mt-1">
                   Must be at least 6 characters
                 </p>
               </div>
@@ -295,14 +296,18 @@ function ResetPasswordContent() {
                     placeholder="••••••••"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full rounded-lg border border-gray-300 py-3 pl-11 pr-11 text-sm focus:border-green-600 focus:outline-none focus:ring-2 focus:ring-green-600/20"
+                    className="w-full rounded-lg border border-[#D4AF37] py-3 pl-11 pr-11 text-sm focus:border-[#D4AF37] focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#D4AF37] hover:text-[#D4AF37]"
                   >
-                    {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    {showConfirmPassword ? (
+                      <EyeOff size={20} />
+                    ) : (
+                      <Eye size={20} />
+                    )}
                   </button>
                 </div>
               </div>
@@ -313,7 +318,7 @@ function ResetPasswordContent() {
                 whileTap={{ scale: 0.98 }}
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-lg bg-green-600 py-3 font-semibold text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full rounded-lg bg-[#D4AF37] py-3 font-semibold text-white hover:bg-[#D4AF37] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? "Resetting..." : "Reset Password"}
               </motion.button>
@@ -327,11 +332,13 @@ function ResetPasswordContent() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+        </div>
+      }
+    >
       <ResetPasswordContent />
     </Suspense>
   );

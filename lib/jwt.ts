@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 export interface JWTPayload {
   id: string;
   email: string;
-  role: 'superadmin' | 'admin' | 'organization' | 'helpdesk';
+  role: 'superadmin' | 'admin' | 'organization' | 'helpdesk' | 'electionAdmin';
   organizationId?: string;
 }
 

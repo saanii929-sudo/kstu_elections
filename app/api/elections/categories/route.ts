@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import ElectionCategory from '@/models/ElectionCategory';
-import Election from '@/models/Election';
 import { verifyToken } from '@/lib/auth';
+import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 
+// Deliberately public/unauthenticated — this is the voter-facing ballot's
+// own category (position) list (app/election/vote/page.tsx calls this with
+// no auth header) as well as the admin dashboard's read. Do not add an auth
+// requirement here.
 export async function GET(req: NextRequest) {
   try {
     await connectDB();
@@ -44,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -57,10 +61,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const election = await Election.findOne({
-      _id: electionId,
-      organizationId: decoded.id,
-    });
+    const election = await getAccessibleElection(decoded, electionId);
 
     if (!election) {
       return NextResponse.json(
@@ -71,7 +72,8 @@ export async function POST(req: NextRequest) {
 
     const category = await ElectionCategory.create({
       electionId,
-      organizationId: decoded.id,
+      // The election's real owning organization, not the acting admin's own id.
+      organizationId: election.organizationId,
       name,
       description,
       maxSelections: maxSelections || 1,

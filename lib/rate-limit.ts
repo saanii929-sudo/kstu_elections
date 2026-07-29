@@ -1,13 +1,30 @@
-const rateMap = new Map<string, { count: number; resetTime: number }>();
+// Cached on `global` (mirroring lib/mongodb.ts's connection cache) so a
+// Next.js dev-mode hot-reload of this module doesn't wipe live rate-limit
+// counters — without this, an edit to any file that (transitively) imports
+// this module resets everyone's limit windows, and duplicates the cleanup
+// interval below on every reload.
+declare global {
+  var __rateMap: Map<string, { count: number; resetTime: number }> | undefined;
+  var __rateMapCleanupStarted: boolean | undefined;
+}
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of rateMap) {
-    if (now > value.resetTime) {
-      rateMap.delete(key);
+const rateMap: Map<string, { count: number; resetTime: number }> =
+  global.__rateMap || new Map();
+if (!global.__rateMap) {
+  global.__rateMap = rateMap;
+}
+
+if (!global.__rateMapCleanupStarted) {
+  global.__rateMapCleanupStarted = true;
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, value] of rateMap) {
+      if (now > value.resetTime) {
+        rateMap.delete(key);
+      }
     }
-  }
-}, 5 * 60 * 1000);
+  }, 5 * 60 * 1000);
+}
 
 export interface RateLimitResult {
   allowed: boolean;

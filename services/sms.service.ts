@@ -43,10 +43,21 @@ function scientificToDecimal(num: string): string {
   }
 }
 
+// mNotify wants recipients in local Ghana format (0XXXXXXXXX), per their own
+// docs examples (e.g. '0241234567') — not the +233 E.164 format the
+// previous gateway used.
+function toLocalGhanaFormat(phoneStr: string): string {
+  const cleaned = phoneStr.replace(/[\s\-\(\)]/g, "");
+  if (cleaned.startsWith("+233")) return "0" + cleaned.slice(4);
+  if (cleaned.startsWith("233")) return "0" + cleaned.slice(3);
+  if (!cleaned.startsWith("0")) return "0" + cleaned;
+  return cleaned;
+}
+
 export async function sendSms({
   to,
   message,
-  senderId = "PAWAVOTES",
+  senderId = "KsTUEvote",
 }: SendSmsParams): Promise<SmsResponse> {
   try {
     let phoneStr = String(to).trim();
@@ -59,7 +70,7 @@ export async function sendSms({
       console.log("Removed decimal point:", phoneStr);
     }
 
-    const apiKey = process.env.ARKESEL_API_KEY;
+    const apiKey = process.env.MNOTIFY_API_KEY;
 
     if (!apiKey) {
       return {
@@ -67,18 +78,9 @@ export async function sendSms({
         error: "SMS service not configured",
       };
     }
-    const cleanPhone = phoneStr.replace(/[\s\-\(\)]/g, "");
-    let phoneNumber = cleanPhone;
-    if (!phoneNumber.startsWith("+")) {
-      if (phoneNumber.startsWith("0")) {
-        phoneNumber = "+233" + phoneNumber.substring(1);
-      } else if (!phoneNumber.startsWith("233")) {
-        phoneNumber = "+233" + phoneNumber;
-      } else {
-        phoneNumber = "+" + phoneNumber;
-      }
-    }
-    const apiUrl = `https://sms.arkesel.com/sms/api?action=send-sms&api_key=${apiKey}&to=${encodeURIComponent(phoneNumber)}&from=${encodeURIComponent(senderId)}&sms=${encodeURIComponent(message)}`;
+
+    const phoneNumber = toLocalGhanaFormat(phoneStr);
+    const apiUrl = `https://api.mnotify.com/api/sms/quick?key=${apiKey}`;
 
     // A plain fetch() has no timeout — if the SMS gateway is unreachable
     // (network egress blocked, DNS black hole, etc.) this would otherwise
@@ -89,7 +91,15 @@ export async function sendSms({
     let response: Response;
     try {
       response = await fetch(apiUrl, {
-        method: "GET",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: [phoneNumber],
+          sender: senderId,
+          message,
+          is_schedule: false,
+          schedule_date: "",
+        }),
         signal: controller.signal,
       });
     } finally {
@@ -102,18 +112,18 @@ export async function sendSms({
         `SMS API returned status ${response.status}: ${errorText}`,
       );
     }
-    
+
     const data = await response.json();
-    
-    if (data.code === "ok" || data.status === "success") {
+
+    if (data.status === "success") {
       return {
         success: true,
-        message: "SMS sent successfully",
+        message: data.message || "SMS sent successfully",
       };
     } else {
       return {
         success: false,
-        error: data.message || "Failed to send SMS",
+        error: data.message || `mNotify error (code ${data.code ?? "unknown"})`,
       };
     }
   } catch (error: any) {
@@ -186,7 +196,7 @@ Contact your election administrator for your secure voting link.
   const result = await sendSms({
     to: phone,
     message,
-    senderId: "PAWAVOTES",
+    senderId: "KsTUEvote",
   });
 
   if (result.success) {
@@ -235,7 +245,7 @@ Keep these credentials safe.
   const result = await sendSms({
     to: phone,
     message,
-    senderId: "PAWAVOTES",
+    senderId: "KsTUEvote",
   });
 
   if (result.success) {
@@ -247,37 +257,31 @@ Keep these credentials safe.
   return result.success;
 }
 
-export async function sendTicketSmsConfirmation(
-  phone: string,
-  buyerName: string,
-  eventTitle: string,
-  ticketTypeName: string,
-  quantity: number,
-  reference: string,
-): Promise<boolean> {
-  const appUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-  const downloadLink = `${appUrl}/ticket-download?ref=${reference}`;
+// Admin/electionAdmin login OTP — used instead of email when the account
+// has a phone number on file.
+export async function sendAdminOtpSms(phone: string, otp: string): Promise<boolean> {
+  const message = `Your PawaVotes admin verification code is: ${otp}\n\nIt expires in 10 minutes. Do not share this code.`;
 
-  // Keep event + ticket names short to stay within a single 160-char SMS
-  const shortEvent = eventTitle.length > 28 ? eventTitle.substring(0, 25) + '...' : eventTitle;
-  const shortType = ticketTypeName.length > 20 ? ticketTypeName.substring(0, 17) + '...' : ticketTypeName;
-  const firstName = buyerName.split(' ')[0];
-
-  const message =
-    `Hi ${firstName}! Your ${quantity}x ${shortType} ticket(s) for "${shortEvent}" are confirmed.\n` +
-    `Download: ${downloadLink}`;
-
-  const result = await sendSms({ to: phone, message, senderId: 'PAWAVOTES' });
+  const result = await sendSms({
+    to: phone,
+    message,
+    senderId: "KsTUEvote",
+  });
 
   if (result.success) {
-    console.log(`[SMS] Ticket confirmation sent to ${phone} for ref ${reference}`);
+    console.log("Admin OTP SMS sent successfully to:", phone);
   } else {
-    console.warn(`[SMS] Failed to send ticket confirmation to ${phone}:`, result.error);
+    console.error("Failed to send admin OTP SMS:", result.error);
   }
 
   return result.success;
 }
 
+// NOTE: mNotify's balance endpoint wasn't part of the /sms/quick and
+// /sms/group docs this migration was based on — this is our best-effort
+// mapping to mNotify's documented `GET /api/balance/sms` endpoint and
+// should be verified against their actual account/balance docs before
+// being relied on.
 export async function checkSmsBalance(): Promise<{
   success: boolean;
   balance?: number;
@@ -286,7 +290,7 @@ export async function checkSmsBalance(): Promise<{
   error?: string;
 }> {
   try {
-    const apiKey = process.env.ARKESEL_API_KEY;
+    const apiKey = process.env.MNOTIFY_API_KEY;
 
     if (!apiKey) {
       return {
@@ -295,7 +299,7 @@ export async function checkSmsBalance(): Promise<{
       };
     }
 
-    const apiUrl = `https://sms.arkesel.com/sms/api?action=check-balance&api_key=${apiKey}&response=json`;
+    const apiUrl = `https://api.mnotify.com/api/balance/sms?key=${apiKey}`;
 
     const response = await fetch(apiUrl);
 
@@ -304,13 +308,15 @@ export async function checkSmsBalance(): Promise<{
     }
 
     const data = await response.json();
-    const balance = data.balance || 0;
-    const estimatedSmsCount = balance > 0 ? Math.floor(balance / 0.07) : 0;
+    if (data.status && data.status !== "success") {
+      throw new Error(data.message || "Failed to check SMS balance");
+    }
+    const balance = data.balance ?? 0;
 
     return {
       success: true,
       balance: balance,
-      smsCount: estimatedSmsCount,
+      smsCount: balance,
       currency: "GHS",
     };
   } catch (error: any) {

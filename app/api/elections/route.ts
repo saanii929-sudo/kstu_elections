@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import mongoose from 'mongoose';
 import connectDB from '@/lib/mongodb';
 import Election from '@/models/Election';
 import Candidate from '@/models/Candidate';
 import Voter from '@/models/Voter';
 import ElectionVote from '@/models/ElectionVote';
-import { verifyToken } from '@/lib/auth';
+import Organization from '@/models/Organization';
+import Admin from '@/models/Admin';
+import { verifyToken, generateToken } from '@/lib/auth';
 import { normalizeAlias, isValidAlias, getElectionStatus, ElectionStatusKey } from '@/lib/electionStatus';
+import { isElectionManager, electionListMatch } from '@/lib/electionAccess';
 
 const STATUS_SORT_ORDER: Record<ElectionStatusKey, number> = {
   live: 0,
@@ -26,7 +28,7 @@ export async function GET(req: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest) {
 
     // Aggregation pipelines bypass Mongoose's automatic string->ObjectId casting
     // (unlike .find()), so this must be cast explicitly or the match hits nothing.
-    const match: any = { organizationId: new mongoose.Types.ObjectId(decoded.id) };
+    const match: any = electionListMatch(decoded);
     if (search) {
       const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       match.$or = [{ title: regex }, { alias: regex }];
@@ -58,6 +60,14 @@ export async function GET(req: NextRequest) {
 
     const elections = await Election.aggregate([
       { $match: match },
+      {
+        $lookup: {
+          from: Organization.collection.name,
+          localField: 'organizationId',
+          foreignField: '_id',
+          as: 'organization',
+        },
+      },
       {
         $lookup: {
           from: Candidate.collection.name,
@@ -84,12 +94,13 @@ export async function GET(req: NextRequest) {
       },
       {
         $addFields: {
+          organizationName: { $arrayElemAt: ['$organization.name', 0] },
           candidateCount: { $size: '$candidates' },
           voterCount: { $size: '$voters' },
           totalVotes: { $size: '$votes' },
         },
       },
-      { $project: { candidates: 0, voters: 0, votes: 0 } },
+      { $project: { organization: 0, candidates: 0, voters: 0, votes: 0 } },
     ]);
 
     // Status is schedule-derived, so filtering/sorting on it happens in JS
@@ -139,7 +150,7 @@ export async function POST(req: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -151,6 +162,30 @@ export async function POST(req: NextRequest) {
         { error: 'Title, alias, start date, and end date are required' },
         { status: 400 }
       );
+    }
+
+    // An electionAdmin has no organization of their own — they must name
+    // one, and only one they already have exposure to (via an existing
+    // assigned election), never an arbitrary organization.
+    let organizationId: string;
+    if (decoded.role === 'organization') {
+      organizationId = decoded.id;
+    } else {
+      const requestedOrgId = body.organizationId;
+      if (!requestedOrgId) {
+        return NextResponse.json({ error: 'organizationId is required' }, { status: 400 });
+      }
+      const hasAccess = await Election.exists({
+        _id: { $in: decoded.assignedElections || [] },
+        organizationId: requestedOrgId,
+      });
+      if (!hasAccess) {
+        return NextResponse.json(
+          { error: 'You do not have access to that organization' },
+          { status: 403 }
+        );
+      }
+      organizationId = requestedOrgId;
     }
 
     const normalizedAlias = normalizeAlias(alias);
@@ -180,7 +215,7 @@ export async function POST(req: NextRequest) {
     }
 
     const election = await Election.create({
-      organizationId: decoded.id,
+      organizationId,
       title,
       alias: normalizedAlias,
       description,
@@ -192,12 +227,33 @@ export async function POST(req: NextRequest) {
         requireAllCategories: false,
       },
       status: 'draft',
+      // approvalStatus defaults to 'pending' per the schema — an
+      // electionAdmin-created election waits for superadmin review, same
+      // as an organization's own self-service creation.
     });
+
+    // The admin's current session token was issued at login and doesn't
+    // know about this brand-new election. Every other route trusts
+    // decoded.assignedElections from the token (not a DB lookup), so
+    // without this the admin couldn't manage the election they just
+    // created until they logged out and back in.
+    let newToken: string | undefined;
+    if (decoded.role === 'electionAdmin') {
+      await Admin.findByIdAndUpdate(decoded.id, { $addToSet: { assignedElections: election._id } });
+      newToken = generateToken({
+        id: decoded.id,
+        email: decoded.email,
+        role: decoded.role,
+        sid: decoded.sid,
+        assignedElections: [...(decoded.assignedElections || []), String(election._id)],
+      });
+    }
 
     return NextResponse.json({
       success: true,
       message: 'Election created successfully',
       data: election,
+      ...(newToken ? { token: newToken } : {}),
     }, { status: 201 });
   } catch (error: any) {
     if (error?.code === 11000) {

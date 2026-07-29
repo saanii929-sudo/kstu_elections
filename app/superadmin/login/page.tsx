@@ -17,7 +17,8 @@ export default function SuperAdminLogin() {
   // OTP step state
   const [showOtp, setShowOtp] = useState(false);
   const [loginId, setLoginId] = useState("");
-  const [maskedEmail, setMaskedEmail] = useState("");
+  const [maskedContact, setMaskedContact] = useState("");
+  const [deliveryMethod, setDeliveryMethod] = useState<"email" | "sms">("email");
   const [otpDigits, setOtpDigits] = useState(["", "", "", "", "", ""]);
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -42,6 +43,8 @@ export default function SuperAdminLogin() {
           toast.error('Session expired. Please login again.');
         } else if (user.role === 'superadmin') {
           router.push('/superadmin');
+        } else if (user.role === 'electionAdmin') {
+          router.push('/election-dashboard');
         }
       } catch (error) {
         localStorage.removeItem('token');
@@ -62,7 +65,18 @@ export default function SuperAdminLogin() {
     localStorage.setItem("token", data.token);
     localStorage.setItem("user", JSON.stringify(data.user));
     localStorage.setItem("tokenTimestamp", Date.now().toString());
-    router.push("/superadmin");
+
+    const role = data.user.role;
+    if (role === "superadmin") {
+      router.push("/superadmin");
+    } else if (role === "electionAdmin") {
+      router.push("/election-dashboard");
+    } else {
+      toast.error("No dashboard is available for this account yet.");
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      localStorage.removeItem("tokenTimestamp");
+    }
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -72,7 +86,10 @@ export default function SuperAdminLogin() {
     const loginData = {
       email: email.trim(),
       password: password,
-      userType: "superadmin",
+      // "admin" covers every Admin-model role (superadmin, electionAdmin,
+      // etc.) — the backend derives the actual role from the DB record, not
+      // from this label; completeLogin() below routes by the real role.
+      userType: "admin",
     };
 
     const loadingToast = toast.loading("Logging in...");
@@ -91,7 +108,8 @@ export default function SuperAdminLogin() {
       if (response.ok && data.success && data.requiresOtp) {
         toast.dismiss(loadingToast);
         setLoginId(data.loginId);
-        setMaskedEmail(data.maskedEmail || "");
+        setMaskedContact(data.maskedContact || data.maskedEmail || "");
+        setDeliveryMethod(data.deliveryMethod === "sms" ? "sms" : "email");
         setOtpDigits(["", "", "", "", "", ""]);
         setResendCooldown(60);
         setShowOtp(true);
@@ -219,6 +237,7 @@ export default function SuperAdminLogin() {
                   height={100}
                 />
                 <h1 className="font-bold text-[#1C2338] text-lg">Kumasi Technical University</h1>
+                <h2 className="font-bold text-[#D4AF37] text-sm">Electronic Voting System</h2>
               </div>
               <form onSubmit={handleSubmit}>
                 <div style={{ marginBottom: "16px" }}>
@@ -349,9 +368,11 @@ export default function SuperAdminLogin() {
 
               <div className="px-8 py-6">
                 <div className="bg-gray-50 rounded-xl p-4 mb-6 text-center">
-                  <p className="text-xs text-gray-500 mb-1">A 6-digit code was sent to</p>
+                  <p className="text-xs text-gray-500 mb-1">
+                    A 6-digit code was sent {deliveryMethod === "sms" ? "via SMS to" : "to"}
+                  </p>
                   <p className="text-sm font-semibold text-gray-800">
-                    {maskedEmail || "your registered email"}
+                    {maskedContact || (deliveryMethod === "sms" ? "your registered phone" : "your registered email")}
                   </p>
                 </div>
 

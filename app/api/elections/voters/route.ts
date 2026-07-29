@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Voter from '@/models/Voter';
-import Election from '@/models/Election';
 import { verifyToken } from '@/lib/auth';
 import { hashPassword } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { sendVoterCredentialsSms } from '@/services/sms.service';
 import { generateVoterLinkHash, buildVoterLoginUrl } from '@/lib/voterLink';
+import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 
 function scientificToDecimal(num: string): string {
   const numStr = String(num).trim();
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -110,10 +110,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const election = await Election.findOne({
-      _id: electionId,
-      organizationId: decoded.id,
-    });
+    const election = await getAccessibleElection(decoded, electionId);
 
     if (!election) {
       return NextResponse.json(
@@ -147,7 +144,7 @@ export async function POST(req: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -168,10 +165,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const election = await Election.findOne({
-      _id: electionId,
-      organizationId: decoded.id,
-    });
+    const election = await getAccessibleElection(decoded, electionId);
 
     if (!election) {
       return NextResponse.json(
@@ -209,7 +203,8 @@ export async function POST(req: NextRequest) {
     const linkHash = generateVoterLinkHash(voterToken, hashedPassword);
     const voter = await Voter.create({
       electionId,
-      organizationId: decoded.id,
+      // The election's real owning organization, not the acting admin's own id.
+      organizationId: election.organizationId,
       name,
       email,
       phone: phoneNumber || undefined,

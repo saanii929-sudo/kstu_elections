@@ -6,6 +6,7 @@ import { verifyToken, hashPassword } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { sendVoterCredentialsSms } from '@/services/sms.service';
 import { generateVoterLinkHash, buildVoterLoginUrl } from '@/lib/voterLink';
+import { isElectionManager, electionOwnerMatch } from '@/lib/electionAccess';
 
 function generatePassword(): string {
   const uppercase = 'ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -173,7 +174,7 @@ async function resendCredentials(
     }
 
     const decoded = verifyToken(token);
-    if (!decoded) {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
@@ -193,7 +194,7 @@ async function resendCredentials(
     // Find voter
     const voter = await Voter.findOne({
       _id: id,
-      organizationId: decoded.id,
+      ...electionOwnerMatch(decoded),
     });
 
     if (!voter) {

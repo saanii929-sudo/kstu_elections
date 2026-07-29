@@ -5,6 +5,7 @@ import Voter from '@/models/Voter';
 import Candidate from '@/models/Candidate';
 import ElectionVote from '@/models/ElectionVote';
 import { verifyToken } from '@/lib/auth';
+import { isElectionManager, electionListMatch, electionOwnerMatch } from '@/lib/electionAccess';
 
 // GET dashboard statistics
 export async function GET(req: NextRequest) {
@@ -17,11 +18,9 @@ export async function GET(req: NextRequest) {
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    const organizationId = decoded.id;
 
     // Fetch all statistics in parallel
     const [
@@ -33,26 +32,26 @@ export async function GET(req: NextRequest) {
       totalVotes,
     ] = await Promise.all([
       // Total elections
-      Election.countDocuments({ organizationId }),
-      
+      Election.countDocuments(electionListMatch(decoded)),
+
       // Active elections (currently running)
       Election.countDocuments({
-        organizationId,
+        ...electionListMatch(decoded),
         startDate: { $lte: new Date() },
         endDate: { $gte: new Date() },
       }),
-      
+
       // Total voters
-      Voter.countDocuments({ organizationId }),
-      
+      Voter.countDocuments(electionOwnerMatch(decoded)),
+
       // Total candidates
-      Candidate.countDocuments({ organizationId }),
-      
+      Candidate.countDocuments(electionOwnerMatch(decoded)),
+
       // Voters who have voted
-      Voter.countDocuments({ organizationId, hasVoted: true }),
-      
+      Voter.countDocuments({ ...electionOwnerMatch(decoded), hasVoted: true }),
+
       // Total votes cast
-      ElectionVote.countDocuments({ organizationId }),
+      ElectionVote.countDocuments(electionOwnerMatch(decoded)),
     ]);
 
     // Calculate turnout rate

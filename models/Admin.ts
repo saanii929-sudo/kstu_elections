@@ -4,8 +4,13 @@ export interface IAdmin extends Document {
   username: string;
   email: string;
   password: string;
-  role: 'superadmin' | 'admin' | 'helpdesk';
+  // Optional — when set, login OTPs are sent via SMS instead of email.
+  phone?: string;
+  role: 'superadmin' | 'admin' | 'helpdesk' | 'electionAdmin';
   status: 'active' | 'inactive';
+  // Elections this admin has been granted scoped access to — only
+  // meaningful when role is 'electionAdmin'.
+  assignedElections: mongoose.Types.ObjectId[];
   resetPasswordToken?: string;
   resetPasswordExpiry?: Date;
   createdAt: Date;
@@ -32,9 +37,13 @@ const AdminSchema: Schema = new Schema(
       required: [true, 'Password is required'],
       minlength: 6,
     },
+    phone: {
+      type: String,
+      trim: true,
+    },
     role: {
       type: String,
-      enum: ['superadmin', 'admin', 'helpdesk'],
+      enum: ['superadmin', 'admin', 'helpdesk', 'electionAdmin'],
       default: 'admin',
     },
     status: {
@@ -42,6 +51,7 @@ const AdminSchema: Schema = new Schema(
       enum: ['active', 'inactive'],
       default: 'active',
     },
+    assignedElections: [{ type: Schema.Types.ObjectId, ref: 'Election' }],
     resetPasswordToken: {
       type: String,
     },

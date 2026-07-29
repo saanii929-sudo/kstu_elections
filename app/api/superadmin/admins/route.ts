@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Admin from '@/models/Admin';
+// Unused directly, but its side-effecting mongoose.model() call must run
+// before .populate('assignedElections', ...) below — see the identical fix
+// in app/api/elections/candidates/route.ts for 'ElectionCategory'.
+import '@/models/Election';
 import { hashPassword } from '@/lib/auth';
 import { withAuth } from '@/middleware/auth';
 import { sendEmail } from '@/lib/email';
@@ -47,7 +51,10 @@ async function getAdmins(req: NextRequest) {
     if (role) query.role = role;
     if (status) query.status = status;
 
-    const admins = await Admin.find(query).select('-password').sort({ createdAt: -1 });
+    const admins = await Admin.find(query)
+      .select('-password')
+      .populate('assignedElections', 'title')
+      .sort({ createdAt: -1 });
 
     return NextResponse.json({ success: true, data: admins });
   } catch (error: any) {
@@ -63,13 +70,16 @@ async function createAdmin(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
-    const { username, email, role, status } = body;
+    const { username, email, phone, role, status, assignedElections } = body;
 
     if (!username || !email) {
       return NextResponse.json({ error: 'Username and email are required' }, { status: 400 });
     }
-    if (!role || !['superadmin', 'admin', 'helpdesk'].includes(role)) {
+    if (!role || !['superadmin', 'admin', 'helpdesk', 'electionAdmin'].includes(role)) {
       return NextResponse.json({ error: 'A valid role is required' }, { status: 400 });
+    }
+    if (role === 'electionAdmin' && (!Array.isArray(assignedElections) || assignedElections.length === 0)) {
+      return NextResponse.json({ error: 'At least one election must be assigned' }, { status: 400 });
     }
 
     const existing = await Admin.findOne({ $or: [{ email }, { username }] });
@@ -86,9 +96,11 @@ async function createAdmin(req: NextRequest) {
     const admin = await Admin.create({
       username,
       email,
+      phone: phone || undefined,
       password: hashedPassword,
       role,
       status: status || 'active',
+      assignedElections: role === 'electionAdmin' ? assignedElections : [],
     });
 
     try {

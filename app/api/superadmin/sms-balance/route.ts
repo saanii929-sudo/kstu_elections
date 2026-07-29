@@ -19,35 +19,38 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Fetch SMS balance from Arkesel API
-    const apiKey = process.env.ARKESEL_API_KEY || "ZEFGc0FndExNUnRvTklFTVByQmI";
-    const apiUrl = `https://sms.arkesel.com/sms/api?action=check-balance&api_key=${apiKey}&response=json`;
+    // Fetch SMS balance from mNotify API
+    const apiKey = process.env.MNOTIFY_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { success: false, message: "SMS service not configured" },
+        { status: 500 }
+      );
+    }
+    const apiUrl = `https://api.mnotify.com/api/balance/sms?key=${apiKey}`;
 
     const response = await fetch(apiUrl);
-    
+
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Arkesel API error:", errorText);
+      console.error("mNotify API error:", errorText);
       throw new Error("Failed to fetch SMS balance");
     }
 
     const data = await response.json();
+    if (data.status && data.status !== "success") {
+      throw new Error(data.message || "Failed to fetch SMS balance");
+    }
 
-    // Parse the response
-    const balance = data.balance || 0;
-    const currency = "GHS"; // Arkesel uses GHS for Ghana
-    const user = data.user || "";
-    const country = data.country || "";
-    const estimatedSmsCount = balance > 0 ? Math.floor(balance / 0.07) : 0;
+    // mNotify's balance is already denominated in SMS credits.
+    const balance = data.balance ?? 0;
 
     return NextResponse.json({
       success: true,
       data: {
         balance: balance,
-        currency: currency,
-        smsCount: estimatedSmsCount,
-        user: user,
-        country: country,
+        currency: "GHS",
+        smsCount: balance,
       },
     });
   } catch (error: any) {

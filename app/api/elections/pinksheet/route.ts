@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import PinkSheet from '@/models/PinkSheet';
-import Election from '@/models/Election';
 import { verifyToken } from '@/lib/auth';
+import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 
 // GET /api/elections/pinksheet?electionId=xxx
 export async function GET(req: NextRequest) {
@@ -14,16 +14,19 @@ export async function GET(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const decoded = verifyToken(token);
-    if (!decoded) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    if (!isElectionManager(decoded)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
     const electionId = searchParams.get('electionId');
     if (!electionId) return NextResponse.json({ error: 'electionId is required' }, { status: 400 });
 
-    const election = await Election.findOne({ _id: electionId, organizationId: decoded.id });
+    const election = await getAccessibleElection(decoded, electionId);
     if (!election) return NextResponse.json({ error: 'Election not found' }, { status: 404 });
 
-    const sheet = await PinkSheet.findOne({ electionId, organizationId: decoded.id });
+    // PinkSheet.organizationId always reflects the election's real owning
+    // organization, not the caller's own id — matters for an electionAdmin,
+    // whose id isn't an Organization id at all.
+    const sheet = await PinkSheet.findOne({ electionId, organizationId: election.organizationId });
 
     return NextResponse.json({
       success: true,
@@ -49,20 +52,23 @@ export async function PUT(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const decoded = verifyToken(token);
-    if (!decoded) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    if (!isElectionManager(decoded)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
     const { electionId, signatures, dates, decisions } = body;
 
     if (!electionId) return NextResponse.json({ error: 'electionId is required' }, { status: 400 });
 
-    const election = await Election.findOne({ _id: electionId, organizationId: decoded.id });
+    const election = await getAccessibleElection(decoded, electionId);
     if (!election) return NextResponse.json({ error: 'Election not found' }, { status: 404 });
 
     // Use findOneAndUpdate with upsert. For Schema.Types.Mixed fields, we must
     // mark modified explicitly, so we use replace-style upsert instead of $set.
+    // organizationId comes from the loaded election (its real owner), not
+    // decoded.id — an electionAdmin's id isn't an Organization id, and a
+    // fresh upsert needs organizationId to satisfy the schema's required field.
     const sheet = await PinkSheet.findOneAndUpdate(
-      { electionId, organizationId: decoded.id },
+      { electionId, organizationId: election.organizationId },
       {
         $set: {
           ...(signatures !== undefined && { signatures }),
@@ -96,13 +102,16 @@ export async function DELETE(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const decoded = verifyToken(token);
-    if (!decoded) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    if (!isElectionManager(decoded)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
     const electionId = searchParams.get('electionId');
     if (!electionId) return NextResponse.json({ error: 'electionId is required' }, { status: 400 });
 
-    const sheet = await PinkSheet.findOne({ electionId, organizationId: decoded.id });
+    const election = await getAccessibleElection(decoded, electionId);
+    if (!election) return NextResponse.json({ error: 'Election not found' }, { status: 404 });
+
+    const sheet = await PinkSheet.findOne({ electionId, organizationId: election.organizationId });
     if (sheet) {
       sheet.signatures = {};
       sheet.dates = {};

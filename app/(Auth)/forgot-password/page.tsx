@@ -119,26 +119,26 @@ export default function ForgotPasswordPage() {
             className="w-full relative max-w-md rounded-2xl bg-white/95 p-8 shadow-2xl backdrop-blur"
           >
             {/* Logo */}
-            <div className="mb-8 py-6 flex justify-center items-center">
+            <div className="flex-col mb-3 flex justify-center items-center">
               <Image
                 src="/images/logo.png"
-                alt="Pawavotes"
-                width={70}
-                height={70}
-                className="absolute md:right-62 right-48"
+                alt="KsTU E-Vote"
+                width={100}
+                height={100}
               />
-              <span className="text-xl font-semibold absolute md:right-40 right-25 text-green-600">
-                Pawavotes
-              </span>
+              <h1 className="font-bold text-[#1C2338] text-lg">
+                Kumasi Technical University
+              </h1>
+              <h2 className="font-bold text-[#D4AF37] text-sm">
+                Electronic Voting System
+              </h2>
             </div>
 
             {!emailSent ? (
               <>
-                <h1 className="mb-2 text-center text-2xl font-bold text-gray-900">
-                  Forgot Password?
-                </h1>
                 <p className="mb-8 text-center text-gray-600 text-sm">
-                  Enter your email address and we'll send you a link to reset your password.
+                  Enter your email address and we'll send you a link to reset
+                  your password.
                 </p>
 
                 <form className="space-y-5" onSubmit={handleSubmit}>
@@ -155,7 +155,7 @@ export default function ForgotPasswordPage() {
                         placeholder="you@example.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 py-3 pl-11 pr-4 text-sm focus:border-green-600 focus:outline-none focus:ring-2 focus:ring-green-600/20"
+                        className="w-full rounded-lg border border-[#D4AF37] py-3 pl-11 pr-4 text-sm focus:border-[#D4AF37] focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"
                       />
                     </div>
                   </div>
@@ -166,7 +166,7 @@ export default function ForgotPasswordPage() {
                     whileTap={{ scale: 0.98 }}
                     type="submit"
                     disabled={loading}
-                    className="w-full rounded-lg bg-green-600 py-3 font-semibold text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full rounded-lg bg-[#D4AF37] py-3 font-semibold text-white hover:bg-[#D4AF37] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {loading ? "Sending..." : "Send Reset Link"}
                   </motion.button>
@@ -176,7 +176,7 @@ export default function ForgotPasswordPage() {
                 <div className="mt-6 text-center">
                   <Link
                     href="/login"
-                    className="text-sm text-green-600 hover:underline inline-flex items-center gap-2"
+                    className="text-sm text-[#D4AF37] hover:underline inline-flex items-center gap-2"
                   >
                     <ArrowLeft size={16} />
                     Back to Login
@@ -186,20 +186,18 @@ export default function ForgotPasswordPage() {
             ) : (
               <div className="text-center">
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Mail className="w-8 h-8 text-green-600" />
+                  <Mail className="w-8 h-8 text-[#D4AF37]" />
                 </div>
-                <h1 className="mb-2 text-2xl font-bold text-gray-900">
-                  Check Your Email
-                </h1>
                 <p className="mb-6 text-gray-600 text-sm">
                   We've sent a password reset link to <strong>{email}</strong>
                 </p>
                 <p className="mb-8 text-gray-500 text-sm">
-                  Click the link in the email to reset your password. If you don't see it, check your spam folder.
+                  Click the link in the email to reset your password. If you
+                  don't see it, check your spam folder.
                 </p>
                 <Link
                   href="/login"
-                  className="inline-flex items-center gap-2 text-sm text-green-600 hover:underline"
+                  className="inline-flex items-center gap-2 text-sm text-[#D4AF37] hover:underline"
                 >
                   <ArrowLeft size={16} />
                   Back to Login

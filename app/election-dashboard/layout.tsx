@@ -39,7 +39,10 @@ export default function ElectionDashboardLayout({
     try {
       const parsedUser = JSON.parse(userData);
 
-      if (parsedUser.role !== 'organization' || parsedUser.eventType !== 'election') {
+      const isElectionOrgOwner = parsedUser.role === 'organization' && parsedUser.eventType === 'election';
+      const isElectionAdmin = parsedUser.role === 'electionAdmin';
+
+      if (!isElectionOrgOwner && !isElectionAdmin) {
         if (parsedUser.role === 'superadmin') {
           router.push('/superadmin');
         } else if (parsedUser.role === 'organization' && parsedUser.eventType === 'awards') {

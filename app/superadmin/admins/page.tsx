@@ -9,21 +9,30 @@ interface AdminRecord {
   _id: string;
   username: string;
   email: string;
-  role: "superadmin" | "admin" | "helpdesk";
+  phone?: string;
+  role: "superadmin" | "admin" | "helpdesk" | "electionAdmin";
   status: "active" | "inactive";
   createdAt: string;
+  assignedElections?: (string | { _id: string; title: string })[];
+}
+
+interface ElectionOption {
+  _id: string;
+  title: string;
 }
 
 const ROLE_LABEL: Record<string, string> = {
   superadmin: "Super Admin",
   admin: "Admin",
   helpdesk: "Help Desk",
+  electionAdmin: "Election Admin",
 };
 
 const ROLE_STYLE: Record<string, string> = {
   superadmin: "bg-violet-50 text-violet-700",
   admin: "bg-blue-50 text-blue-700",
   helpdesk: "bg-amber-50 text-amber-700",
+  electionAdmin: "bg-emerald-50 text-emerald-700",
 };
 
 const STATUS_STYLE: Record<string, { dot: string; text: string; label: string }> = {
@@ -35,7 +44,7 @@ const inputCls =
   "w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors bg-white placeholder:text-gray-400";
 const labelCls = "block text-xs font-semibold text-gray-600 mb-1.5";
 
-const BLANK_FORM = { username: "", email: "", role: "admin", status: "active" };
+const BLANK_FORM = { username: "", email: "", phone: "", role: "admin", status: "active", assignedElections: [] as string[] };
 
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -48,6 +57,7 @@ export default function AdministratorsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState<AdminRecord | null>(null);
   const [formData, setFormData] = useState({ ...BLANK_FORM });
+  const [elections, setElections] = useState<ElectionOption[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [alertModal, setAlertModal] = useState({
     isOpen: false, title: "", message: "", type: "info" as "success" | "error" | "info" | "warning",
@@ -74,6 +84,18 @@ export default function AdministratorsPage() {
     }
   };
 
+  const fetchElections = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`/api/superadmin/elections`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setElections((await res.json()).data);
+    } catch {
+      /* non-critical */
+    }
+  };
+
   const closeModal = () => {
     setShowModal(false);
     setEditingAdmin(null);
@@ -84,16 +106,34 @@ export default function AdministratorsPage() {
     setEditingAdmin(null);
     setFormData({ ...BLANK_FORM });
     setShowModal(true);
+    if (elections.length === 0) fetchElections();
   };
 
   const openEditModal = (admin: AdminRecord) => {
     setEditingAdmin(admin);
-    setFormData({ username: admin.username, email: admin.email, role: admin.role, status: admin.status });
+    setFormData({
+      username: admin.username,
+      email: admin.email,
+      phone: admin.phone || "",
+      role: admin.role,
+      status: admin.status,
+      assignedElections: (admin.assignedElections || []).map((e) => (typeof e === "string" ? e : e._id)),
+    });
     setShowModal(true);
+    if (elections.length === 0) fetchElections();
   };
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setFormData((p) => ({ ...p, [k]: e.target.value }));
+
+  const toggleElection = (electionId: string) => {
+    setFormData((p) => ({
+      ...p,
+      assignedElections: p.assignedElections.includes(electionId)
+        ? p.assignedElections.filter((id) => id !== electionId)
+        : [...p.assignedElections, electionId],
+    }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -357,13 +397,55 @@ export default function AdministratorsPage() {
                 />
               </div>
               <div>
+                <label className={labelCls}>Phone (optional)</label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={set("phone")}
+                  className={inputCls}
+                  placeholder="e.g. 0241234567"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  When set, login verification codes are sent by SMS instead of email.
+                </p>
+              </div>
+              <div>
                 <label className={labelCls}>Role</label>
                 <select value={formData.role} onChange={set("role")} className={inputCls}>
                   <option value="superadmin">Super Admin</option>
                   <option value="admin">Admin</option>
                   <option value="helpdesk">Help Desk</option>
+                  <option value="electionAdmin">Election Admin</option>
                 </select>
               </div>
+              {formData.role === "electionAdmin" && (
+                <div>
+                  <label className={labelCls}>Assign Elections *</label>
+                  <div className="border border-gray-200 rounded-xl p-3 max-h-48 overflow-y-auto space-y-1">
+                    {elections.length === 0 ? (
+                      <p className="text-xs text-gray-400 px-1 py-2">No elections found.</p>
+                    ) : (
+                      elections.map((election) => (
+                        <label
+                          key={election._id}
+                          className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.assignedElections.includes(election._id)}
+                            onChange={() => toggleElection(election._id)}
+                            className="w-4 h-4 text-[#D4AF37] rounded focus:ring-green-500"
+                          />
+                          <span className="text-sm text-gray-700">{election.title}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Selected: {formData.assignedElections.length} election(s)
+                  </p>
+                </div>
+              )}
               {editingAdmin && (
                 <div>
                   <label className={labelCls}>Status</label>

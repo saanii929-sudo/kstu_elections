@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import Election from '@/models/Election';
 import ElectionVote from '@/models/ElectionVote';
 import Voter from '@/models/Voter';
 import Candidate from '@/models/Candidate';
 import ElectionCategory from '@/models/ElectionCategory';
 import { verifyToken } from '@/lib/auth';
+import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 
 // GET /api/elections/reports?electionId=xxx&type=activity|results|voters
 export async function GET(req: NextRequest) {
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const decoded = verifyToken(token);
-    if (!decoded) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    if (!isElectionManager(decoded)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
     const electionId = searchParams.get('electionId');
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'electionId is required' }, { status: 400 });
     }
 
-    const election = await Election.findOne({ _id: electionId, organizationId: decoded.id });
+    const election = await getAccessibleElection(decoded, electionId);
     if (!election) return NextResponse.json({ error: 'Election not found' }, { status: 404 });
 
     if (type === 'activity') {

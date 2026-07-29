@@ -8,6 +8,7 @@ import ElectionVote from '@/models/ElectionVote';
 import PinkSheet from '@/models/PinkSheet';
 import { verifyToken } from '@/lib/auth';
 import { normalizeAlias, isValidAlias } from '@/lib/electionStatus';
+import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 
 export async function PUT(
   req: NextRequest,
@@ -22,17 +23,14 @@ export async function PUT(
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { id } = await params;
     const body = await req.json();
     const { title, alias, description, startDate, endDate, settings, status } = body;
-    const election = await Election.findOne({
-      _id: id,
-      organizationId: decoded.id,
-    });
+    const election = await getAccessibleElection(decoded, id);
 
     if (!election) {
       return NextResponse.json(
@@ -121,14 +119,14 @@ export async function DELETE(
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { id } = await params;
 
     // Verify ownership before deleting
-    const election = await Election.findOne({ _id: id, organizationId: decoded.id });
+    const election = await getAccessibleElection(decoded, id);
     if (!election) {
       return NextResponse.json({ error: 'Election not found' }, { status: 404 });
     }

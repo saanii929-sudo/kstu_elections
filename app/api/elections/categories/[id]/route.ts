@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import ElectionCategory from '@/models/ElectionCategory';
 import { verifyToken } from '@/lib/auth';
+import { isElectionManager, electionOwnerMatch } from '@/lib/electionAccess';
 
 export async function PUT(
   req: NextRequest,
@@ -16,7 +17,7 @@ export async function PUT(
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -25,7 +26,7 @@ export async function PUT(
     const { name, description, maxSelections, order } = body;
     const category = await ElectionCategory.findOne({
       _id: id,
-      organizationId: decoded.id,
+      ...electionOwnerMatch(decoded),
     });
 
     if (!category) {
@@ -73,14 +74,14 @@ export async function DELETE(
     }
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { id } = await params;
     const category = await ElectionCategory.findOneAndDelete({
       _id: id,
-      organizationId: decoded.id,
+      ...electionOwnerMatch(decoded),
     });
 
     if (!category) {

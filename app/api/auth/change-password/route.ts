@@ -3,6 +3,7 @@ import connectDB from '@/lib/mongodb';
 import Organization from '@/models/Organization';
 import OrganizationAdmin from '@/models/OrganizationAdmin';
 import EventOrganizer from '@/models/EventOrganizer';
+import Admin from '@/models/Admin';
 import { hashPassword, verifyPassword, verifyToken } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
@@ -51,6 +52,8 @@ export async function POST(req: NextRequest) {
       user = await OrganizationAdmin.findById(decoded.id);
     } else if (decoded.role === 'event-organizer') {
       user = await EventOrganizer.findById(decoded.id);
+    } else if (decoded.role === 'superadmin' || decoded.role === 'electionAdmin') {
+      user = await Admin.findById(decoded.id);
     } else {
       return NextResponse.json(
         { error: 'Password change is not available for this account type' },

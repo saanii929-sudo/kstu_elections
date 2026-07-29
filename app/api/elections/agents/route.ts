@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import ElectionAgent from '@/models/ElectionAgent';
-import Election from '@/models/Election';
 import { verifyToken, hashPassword } from '@/lib/auth';
+import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 import { sendSms } from '@/services/sms.service';
 
 function generatePassword(): string {
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -40,10 +40,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'electionId is required' }, { status: 400 });
     }
 
-    const agents = await ElectionAgent.find({
-      electionId,
-      organizationId: decoded.id,
-    }).select('-password').sort({ createdAt: -1 });
+    const election = await getAccessibleElection(decoded, electionId);
+    if (!election) {
+      return NextResponse.json({ error: 'Election not found' }, { status: 404 });
+    }
+
+    const agents = await ElectionAgent.find({ electionId })
+      .select('-password')
+      .sort({ createdAt: -1 });
 
     return NextResponse.json({ success: true, data: agents });
   } catch (error: any) {
@@ -60,7 +64,7 @@ export async function POST(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -74,7 +78,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const election = await Election.findOne({ _id: electionId, organizationId: decoded.id });
+    const election = await getAccessibleElection(decoded, electionId);
     if (!election) {
       return NextResponse.json({ error: 'Election not found' }, { status: 404 });
     }
@@ -86,7 +90,9 @@ export async function POST(req: NextRequest) {
       name,
       phone,
       electionId,
-      organizationId: decoded.id,
+      // The election's real owning organization — decoded.id is the acting
+      // admin's own id for an electionAdmin, not a valid organizationId.
+      organizationId: election.organizationId,
       candidates,
       password: hashedPassword,
     });
@@ -127,14 +133,20 @@ export async function DELETE(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const decoded = verifyToken(token);
-    if (!decoded || decoded.role !== 'organization') {
+    if (!isElectionManager(decoded)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const agentId = req.nextUrl.searchParams.get('agentId');
     if (!agentId) return NextResponse.json({ error: 'agentId is required' }, { status: 400 });
 
-    await ElectionAgent.deleteOne({ _id: agentId, organizationId: decoded.id });
+    const agent = await ElectionAgent.findById(agentId);
+    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+
+    const election = await getAccessibleElection(decoded, agent.electionId.toString());
+    if (!election) return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+
+    await ElectionAgent.deleteOne({ _id: agentId });
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

@@ -11,6 +11,7 @@ import {
   Users,
   Vote,
   UserCheck,
+  Plus,
 } from "lucide-react";
 import AlertModal from "@/components/AlertModal";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -38,6 +39,21 @@ interface CandidateRecord {
   voteCount: number;
   approvalStatus: "pending" | "approved" | "rejected";
 }
+
+interface OrganizationOption {
+  _id: string;
+  name: string;
+  eventType: "awards" | "election";
+}
+
+const BLANK_CREATE_FORM = {
+  organizationId: "",
+  title: "",
+  alias: "",
+  description: "",
+  startDate: "",
+  endDate: "",
+};
 
 const APPROVAL_STYLE: Record<string, string> = {
   pending: "bg-amber-50 text-amber-700",
@@ -76,10 +92,58 @@ export default function SuperAdminElectionsPage() {
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false, title: "", message: "", onConfirm: () => {},
   });
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
+  const [createForm, setCreateForm] = useState(BLANK_CREATE_FORM);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     fetchElections();
   }, [search, approvalFilter]);
+
+  const fetchOrganizations = async () => {
+    try {
+      const res = await fetch(`/api/superadmin/organizations?limit=500`, {
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setOrganizations((data.data || []).filter((o: OrganizationOption) => o.eventType === "election"));
+      }
+    } catch {
+      /* non-critical */
+    }
+  };
+
+  const openCreateModal = () => {
+    setCreateForm(BLANK_CREATE_FORM);
+    setShowCreateModal(true);
+    if (organizations.length === 0) fetchOrganizations();
+  };
+
+  const submitCreateElection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      const res = await fetch(`/api/superadmin/elections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(createForm),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setShowCreateModal(false);
+        setAlertModal({ isOpen: true, title: "Election Created", message: `"${createForm.title}" was created successfully.`, type: "success" });
+        fetchElections();
+      } else {
+        setAlertModal({ isOpen: true, title: "Error", message: data.error || "Failed to create election", type: "error" });
+      }
+    } catch {
+      setAlertModal({ isOpen: true, title: "Error", message: "Failed to create election", type: "error" });
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const fetchElections = async () => {
     try {
@@ -277,6 +341,13 @@ export default function SuperAdminElectionsPage() {
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
         </select>
+        <button
+          onClick={openCreateModal}
+          className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 transition-colors whitespace-nowrap"
+        >
+          <Plus size={15} />
+          Create Election
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl ring-1 ring-gray-100 overflow-hidden">
@@ -462,6 +533,115 @@ export default function SuperAdminElectionsPage() {
           </table>
         </div>
       </div>
+
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="bg-emerald-600 px-6 py-4 shrink-0">
+              <h2 className="text-lg font-bold text-white">Create Election</h2>
+              <p className="text-emerald-100 text-xs mt-0.5">Create an election directly on behalf of an organization</p>
+            </div>
+            <form onSubmit={submitCreateElection} className="p-6 space-y-4 overflow-y-auto">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  Organization <span className="text-red-400">*</span>
+                </label>
+                <select
+                  required
+                  value={createForm.organizationId}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, organizationId: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">Select an organization…</option>
+                  {organizations.map((org) => (
+                    <option key={org._id} value={org._id}>{org.name}</option>
+                  ))}
+                </select>
+                {organizations.length === 0 && (
+                  <p className="text-xs text-gray-400 mt-1">No election-type organizations found. Create one first.</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  Title <span className="text-red-400">*</span>
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={createForm.title}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  Alias <span className="text-red-400">*</span>
+                </label>
+                <input
+                  required
+                  type="text"
+                  placeholder="e.g. SRC-2026"
+                  value={createForm.alias}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, alias: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">2-20 characters: letters, numbers, and hyphens only.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">Description</label>
+                <textarea
+                  rows={2}
+                  value={createForm.description}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                    Start Date <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    required
+                    type="datetime-local"
+                    value={createForm.startDate}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, startDate: e.target.value }))}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                    End Date <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    required
+                    type="datetime-local"
+                    value={createForm.endDate}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, endDate: e.target.value }))}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-5 py-2.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="px-6 py-2.5 text-sm font-semibold bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-60"
+                >
+                  {creating ? "Creating…" : "Create Election"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {resetTarget && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">

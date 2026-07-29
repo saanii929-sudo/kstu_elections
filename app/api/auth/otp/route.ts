@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateToken } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
+import { sendAdminOtpSms } from '@/services/sms.service';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { peekPendingLogin, regenerateOtp, consumePendingLogin } from '@/lib/adminOtp';
 import { createSession } from '@/lib/sessionStore';
@@ -38,12 +39,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sent = await sendEmail({
-      to: pending.email,
-      subject: 'Your PawaVotes verification code',
-      html: `<p>Your one-time verification code is:</p><h2 style="letter-spacing:4px;">${otp}</h2><p>This code expires in 10 minutes.</p>`,
-      text: `Your PawaVotes verification code is ${otp}. It expires in 10 minutes.`,
-    });
+    const sent = pending.deliveryMethod === 'sms'
+      ? await sendAdminOtpSms(pending.contact, otp)
+      : await sendEmail({
+          to: pending.contact,
+          subject: 'Your PawaVotes verification code',
+          html: `<p>Your one-time verification code is:</p><h2 style="letter-spacing:4px;">${otp}</h2><p>This code expires in 10 minutes.</p>`,
+          text: `Your PawaVotes verification code is ${otp}. It expires in 10 minutes.`,
+        });
 
     if (!sent) {
       return NextResponse.json({ error: 'Failed to resend verification code' }, { status: 500 });

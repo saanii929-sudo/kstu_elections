@@ -55,6 +55,7 @@ const menu = [
   { name: "Reports", href: "/election-dashboard/reports", icon: FileText },
   { name: "Help Desk", href: "/election-dashboard/helpdesk", icon: Headphones },
   { name: "Sessions", href: "/election-dashboard/sessions", icon: MonitorSmartphone },
+  { name: "Profile", href: "/election-dashboard/profile", icon: UserCircle },
 ];
 
 export default function Sidebar1() {
@@ -73,6 +74,13 @@ export default function Sidebar1() {
 
   const filteredMenu = menu.filter((item) => {
     if (userRole === "org-admin" && item.name === "Organization") {
+      return false;
+    }
+    // Help desk sub-accounts are single-organization-scoped and managed by
+    // the org owner — structurally incompatible with an electionAdmin whose
+    // assigned elections may belong to different organizations, and not
+    // part of an electionAdmin's granted access.
+    if (userRole === "electionAdmin" && item.name === "Help Desk") {
       return false;
     }
     return true;

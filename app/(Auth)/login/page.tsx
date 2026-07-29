@@ -281,9 +281,8 @@ export default function Home() {
                   width={100}
                   height={100}
                 />
-                <h1 className="font-bold text-[#1C2338] text-lg">
-                  Kumasi Technical University
-                </h1>
+                <h1 className="font-bold text-[#1C2338] text-lg">Kumasi Technical University</h1>
+                <h2 className="font-bold text-[#D4AF37] text-sm">Electronic Voting System</h2>
               </div>
 
               <form className="space-y-5" onSubmit={handleSubmit}>
