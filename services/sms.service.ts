@@ -153,45 +153,15 @@ export async function sendVoterCredentialsSms(
   secureLink?: string,
   electionAlias?: string,
 ): Promise<boolean> {
-  const formatDate = (date: Date) => {
-    return new Date(date).toLocaleString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
-  };
+  const electionLabel = electionAlias;
 
-  let dateInfo = "";
-  if (startDate && endDate) {
-    dateInfo = `\n\nVoting Period:\n${formatDate(startDate)} - ${formatDate(endDate)}`;
-  }
-  const electionLabel = electionAlias ? `${electionTitle} (${electionAlias})` : electionTitle;
-  const closesInfo = endDate ? ` before ${formatDate(endDate)}` : "";
-
+  // Short, single-message-segment format — every extra character here is
+  // extra SMS cost across an entire voter roll. "Password" (not "Token"):
+  // this system logs voters in with Student ID + password, not a token.
   const message = secureLink
-    ? `Hello ${name},
-
-You are invited to vote in ${electionLabel}. Click the secure link below, then enter your student number and password to continue${closesInfo}:
-
-${secureLink}
-
-Student Number: ${studentId}
-Password: ${password}
-
-This link is unique to you, cannot be shared, and expires automatically.${dateInfo}
-`
-    : `Hello ${name},
-
-You are invited to vote in ${electionLabel}.
-
-Student Number: ${studentId}
-Password: ${password}${dateInfo}
-
-Contact your election administrator for your secure voting link.
-`;
+    ? `Hi, please use Student/Staff ID: ${studentId} and Password: ${password} for [${electionLabel}] with the link below. Thank You.
+${secureLink}`
+    : `Hi, please use Student/Staff ID: ${studentId} and Password: ${password} for [${electionLabel}]. Contact your election administrator for your secure voting link. Thank You.`;
 
   const result = await sendSms({
     to: phone,
@@ -261,7 +231,7 @@ Keep these credentials safe.
 // (organization, admin, superadmin, electionAdmin) — used instead of email
 // when the account has a phone number on file.
 export async function sendAdminOtpSms(phone: string, otp: string): Promise<boolean> {
-  const message = `Your PawaVotes verification code is: ${otp}\n\nIt expires in 10 minutes. Do not share this code.`;
+  const message = `Your KsTU-EVOTE verification code is: ${otp}\n\nIt expires in 10 minutes. Do not share this code.`;
 
   const result = await sendSms({
     to: phone,
@@ -289,7 +259,7 @@ export async function sendAdminCredentialsSms(
 ): Promise<boolean> {
   const message = `Hello ${username},
 
-Your PawaVotes administrator account (${role}) has been created.
+Your KsTU-EVOTE administrator account (${role}) has been created.
 
 Email: ${email}
 Password: ${password}

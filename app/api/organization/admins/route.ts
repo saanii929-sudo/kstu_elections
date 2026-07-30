@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
       const invitationLink = `${baseUrl}/accept-invitation?token=${invitationToken}`;
       const emailSent = await sendInvitationEmail(
         email,
@@ -243,7 +243,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Build invitation link
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
     const invitationLink = `${baseUrl}/accept-invitation?token=${invitationToken}`;
 
     const emailSent = await sendInvitationEmail(
