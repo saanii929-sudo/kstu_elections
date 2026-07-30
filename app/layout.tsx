@@ -44,6 +44,8 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <VisitorTracker />
+        <DisableInspect />
+        <DevToolsGuard />
         {children}
       </body>
     </html>

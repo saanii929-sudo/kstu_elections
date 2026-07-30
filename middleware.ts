@@ -1,15 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Web Crypto (not Node's `crypto` module) so this works whether middleware
-// runs on the Edge or Node.js runtime.
-function generateNonce(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
-}
-
 export function middleware(request: NextRequest) {
   // The voter login page is link-only: it must be reached via the secure,
   // per-voter link (?<linkHash>) sent by SMS/email. A bare visit with no
@@ -19,15 +9,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/election/no-access', request.url));
   }
 
-  // Threaded through as a request header (not just used in the response
-  // CSP) so Next.js's own internally-injected scripts (hydration/RSC
-  // payload) automatically pick it up too — this is the documented Next.js
-  // pattern for CSP nonces, not something specific to this app.
-  const nonce = generateNonce();
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-nonce', nonce);
-
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  const response = NextResponse.next();
 
   // Security headers
   response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -42,28 +24,18 @@ export function middleware(request: NextRequest) {
   response.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   response.headers.set('Cross-Origin-Resource-Policy', 'same-origin');
 
-  // Content-Security-Policy: restrict what can be loaded/executed.
-  // In production, script-src uses a per-request nonce instead of
-  // 'unsafe-inline' — a modern browser ignores unsafe-inline whenever a
-  // nonce-source is present, so an XSS payload that injects its own
-  // <script> tag (the classic reflected/stored-XSS pattern) no longer
-  // executes, since it can't know the nonce. Dev mode stays fully
-  // permissive: Next's webpack HMR genuinely needs unsafe-eval, and dev
-  // never faces the public anyway. unsafe-eval is intentionally left alone
-  // in production too for now — nothing here is known to need it, but it
-  // hasn't been verified risk-free to drop without a full browser
-  // regression pass (chart rendering, Turnstile, framer-motion, vote
-  // submission) first.
-  const isProd = process.env.NODE_ENV === 'production';
-  const scriptSrc = isProd
-    ? `script-src 'self' 'nonce-${nonce}' 'unsafe-eval' https://challenges.cloudflare.com`
-    : "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com";
-
+  // Content-Security-Policy: restrict what can be loaded/executed
   response.headers.set(
     'Content-Security-Policy',
     [
       "default-src 'self'",
-      scriptSrc,
+      // A prior attempt to swap this for a per-request nonce blocked
+      // Next.js's own internally-injected scripts in production (hydration
+      // bootstrap, RSC payload) — reverted. Doing this properly needs the
+      // root layout to read the nonce via next/headers so Next applies it
+      // to its own scripts too, not just middleware setting the header;
+      // that's a real follow-up, not something to guess at again blind.
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
