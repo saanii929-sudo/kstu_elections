@@ -12,11 +12,13 @@ import {
   Trash2,
   Send,
   Mail,
+  CalendarClock,
+  Check,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import AlertModal from "@/components/AlertModal";
 import ConfirmModal from "@/components/ConfirmModal";
-import { authFetch } from '@/lib/authFetch';
+import { authFetch } from "@/lib/authFetch";
 
 interface Voter {
   _id: string;
@@ -28,6 +30,8 @@ interface Voter {
   hasVoted: boolean;
   status: string;
   createdAt: string;
+  credentialsSendAt?: string;
+  credentialsSent: boolean;
 }
 
 interface Election {
@@ -81,6 +85,60 @@ function parseCsvLine(line: string): string[] {
   return fields;
 }
 
+function StepIndicator({
+  current,
+  labels,
+}: {
+  current: number;
+  labels: string[];
+}) {
+  return (
+    <div className="flex items-center mb-6">
+      {labels.map((label, i) => {
+        const step = i + 1;
+        const isDone = step < current;
+        const isActive = step === current;
+        return (
+          <div
+            key={label}
+            className={`flex items-center ${i < labels.length - 1 ? "flex-1" : ""}`}
+          >
+            <div className="flex items-center gap-2 shrink-0">
+              <div
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${
+                  isDone
+                    ? "bg-[#d4af37] text-white"
+                    : isActive
+                      ? "bg-[#1C2338] text-white"
+                      : "bg-gray-200 text-gray-500"
+                }`}
+              >
+                {isDone ? <Check size={14} /> : step}
+              </div>
+              <span
+                className={`text-sm font-medium whitespace-nowrap ${
+                  isActive
+                    ? "text-[#1C2338]"
+                    : isDone
+                      ? "text-[#d4af37]"
+                      : "text-gray-400"
+                }`}
+              >
+                {label}
+              </span>
+            </div>
+            {i < labels.length - 1 && (
+              <div
+                className={`flex-1 h-0.5 mx-3 ${isDone ? "bg-[#d4af37]" : "bg-gray-200"}`}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function VotersPage() {
   const [elections, setElections] = useState<Election[]>([]);
   const [selectedElection, setSelectedElection] = useState("");
@@ -119,7 +177,18 @@ export default function VotersPage() {
   const [bulkDeliveryMethod, setBulkDeliveryMethod] = useState<
     "email" | "sms" | "both"
   >("both");
-  
+  // Credential delivery is always scheduled, never immediate — both of
+  // these are datetime-local input values (local time, no timezone),
+  // required before either form can submit.
+  const [scheduledSendAt, setScheduledSendAt] = useState("");
+  const [bulkScheduledSendAt, setBulkScheduledSendAt] = useState("");
+  // Both modals are 2-step wizards: details/preview first, schedule last.
+  const [addVoterStep, setAddVoterStep] = useState(1);
+  const [bulkStep, setBulkStep] = useState(1);
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [rescheduleSendAt, setRescheduleSendAt] = useState("");
+  const [rescheduling, setRescheduling] = useState(false);
+
   // Modal states
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean;
@@ -127,14 +196,20 @@ export default function VotersPage() {
     message: string;
     type: "success" | "error" | "info" | "warning";
   }>({ isOpen: false, title: "", message: "", type: "info" });
-  
+
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
     message: string;
     onConfirm: () => void;
     type?: "danger" | "warning" | "info";
-  }>({ isOpen: false, title: "", message: "", onConfirm: () => {}, type: "warning" });
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+    type: "warning",
+  });
 
   const [formData, setFormData] = useState({
     name: "",
@@ -178,7 +253,9 @@ export default function VotersPage() {
 
     setLoading(true);
     try {
-      const response = await authFetch(`/api/elections/voters?electionId=${selectedElection}`);
+      const response = await authFetch(
+        `/api/elections/voters?electionId=${selectedElection}`,
+      );
 
       if (response.ok) {
         const data = await response.json();
@@ -191,6 +268,19 @@ export default function VotersPage() {
       setLoading(false);
     }
   };
+  // datetime-local inputs need "YYYY-MM-DDTHH:mm" in local time, not an ISO
+  // string (which is UTC and includes seconds).
+  const toDatetimeLocalValue = (date: Date) => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+  const minScheduleValue = toDatetimeLocalValue(
+    new Date(Date.now() + 60 * 1000),
+  );
+  const maxScheduleValue = selectedElectionData
+    ? toDatetimeLocalValue(new Date(selectedElectionData.endDate))
+    : undefined;
+
   const isElectionEnded = () => {
     if (!selectedElectionData) return false;
     const endDate = new Date(selectedElectionData.endDate);
@@ -204,6 +294,11 @@ export default function VotersPage() {
     // Check if election has ended
     if (isElectionEnded()) {
       toast.error("Cannot add voters. This election has already ended.");
+      return;
+    }
+
+    if (!editingVoter && !scheduledSendAt) {
+      toast.error("Please pick when credentials should be sent.");
       return;
     }
 
@@ -227,6 +322,9 @@ export default function VotersPage() {
           class: formData.class,
         },
       };
+      if (!editingVoter) {
+        payload.credentialsSendAt = new Date(scheduledSendAt).toISOString();
+      }
 
       const response = await authFetch(url, {
         method,
@@ -238,23 +336,24 @@ export default function VotersPage() {
 
       if (response.ok) {
         const data = await response.json();
-        toast.success(
-          editingVoter
-            ? "Voter updated successfully!"
-            : "Voter added successfully!",
-        );
 
-        if (!editingVoter && data.data.password) {
+        if (editingVoter) {
+          toast.success("Voter updated successfully!");
+        } else {
           setAlertModal({
             isOpen: true,
-            title: "Voter Credentials",
-            message: `Student Number: ${data.data.voterId}\nPassword: ${data.data.password}\n\nPlease save these credentials!`,
-            type: "success"
+            title: "Voter Added",
+            message:
+              data.message ||
+              `${formData.name} was added. Their login credentials will be generated and sent at the scheduled time.`,
+            type: "success",
           });
         }
 
         setShowAddModal(false);
         setEditingVoter(null);
+        setScheduledSendAt("");
+        setAddVoterStep(1);
         resetForm();
         fetchVoters();
       } else {
@@ -288,11 +387,12 @@ export default function VotersPage() {
     setConfirmModal({
       isOpen: true,
       title: "Delete Voter",
-      message: "Are you sure you want to delete this voter? This action cannot be undone.",
+      message:
+        "Are you sure you want to delete this voter? This action cannot be undone.",
       type: "danger",
       onConfirm: async () => {
         setConfirmModal({ ...confirmModal, isOpen: false });
-        
+
         try {
           const response = await authFetch(`/api/elections/voters/${voterId}`, {
             method: "DELETE",
@@ -309,7 +409,7 @@ export default function VotersPage() {
           console.error("Delete voter error:", error);
           toast.error("Failed to delete voter");
         }
-      }
+      },
     });
   };
 
@@ -339,18 +439,22 @@ export default function VotersPage() {
     setShowResendModal(false);
     setResendingCredentials(voterId);
     try {
-      const response = await authFetch(`/api/elections/voters/${voterId}/resend`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: editPhone || undefined }),
-      });
+      const response = await authFetch(
+        `/api/elections/voters/${voterId}/resend`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: editPhone || undefined }),
+        },
+      );
 
       if (response.ok) {
         const data = await response.json();
         const methods = [];
         if (data.data?.emailSent) methods.push("email");
         if (data.data?.smsSent) methods.push("SMS");
-        const methodText = methods.length > 0 ? ` via ${methods.join(" and ")}` : "";
+        const methodText =
+          methods.length > 0 ? ` via ${methods.join(" and ")}` : "";
         toast.success(`Credentials resent successfully${methodText}!`);
         fetchVoters();
       } else {
@@ -384,7 +488,10 @@ export default function VotersPage() {
         const text = event.target?.result as string;
         // Excel typically ends lines with \r\n — strip the \r so it can't
         // end up appended to whichever field is last on the line.
-        const lines = text.split("\n").map((line) => line.replace(/\r$/, "")).filter((line) => line.trim());
+        const lines = text
+          .split("\n")
+          .map((line) => line.replace(/\r$/, ""))
+          .filter((line) => line.trim());
 
         if (lines.length < 2) {
           toast.error("CSV file must have at least a header and one data row");
@@ -423,6 +530,7 @@ export default function VotersPage() {
         }
 
         setPendingBulkFile({ fileName: file.name, rows });
+        setBulkStep(1);
       } catch (error) {
         console.error("CSV parse error:", error);
         toast.error("Failed to parse CSV file");
@@ -434,12 +542,20 @@ export default function VotersPage() {
     reader.readAsText(file);
   };
 
-  const cancelPendingBulkFile = () => setPendingBulkFile(null);
+  const cancelPendingBulkFile = () => {
+    setPendingBulkFile(null);
+    setBulkStep(1);
+  };
 
   // Step 2: only after the admin reviews the preview and explicitly confirms
   // does the data actually get submitted.
   const confirmBulkUpload = async () => {
     if (!pendingBulkFile) return;
+
+    if (!bulkScheduledSendAt) {
+      toast.error("Please pick when credentials should be sent.");
+      return;
+    }
 
     setUploadingBulk(true);
     try {
@@ -450,30 +566,17 @@ export default function VotersPage() {
           electionId: selectedElection,
           voters: pendingBulkFile.rows,
           deliveryMethod: bulkDeliveryMethod,
+          credentialsSendAt: new Date(bulkScheduledSendAt).toISOString(),
         }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        let message = `Successfully uploaded ${data.data.successful} voters!`;
-        const notifications = [];
-
-        if (data.data.emailsSent !== undefined) {
-          notifications.push(
-            `Emails: ${data.data.emailsSent} sent${data.data.emailsFailed > 0 ? ` (${data.data.emailsFailed} failed)` : ""}`,
-          );
-        }
-        if (data.data.smsSent !== undefined) {
-          notifications.push(
-            `SMS: ${data.data.smsSent} sent${data.data.smsFailed > 0 ? ` (${data.data.smsFailed} failed)` : ""}`,
-          );
-        }
-        if (notifications.length > 0) {
-          message += ` | ${notifications.join(" | ")}`;
-        }
-
-        toast.success(message);
+        toast.success(
+          data.message ||
+            `Successfully uploaded ${data.data.successful} voters!`,
+        );
         setUploadResults(data.data);
         setPendingBulkFile(null);
         fetchVoters();
@@ -504,7 +607,7 @@ export default function VotersPage() {
         try {
           const response = await authFetch(
             `/api/elections/voters/bulk?batchId=${uploadResults.batchId}&electionId=${selectedElection}`,
-            { method: "DELETE" }
+            { method: "DELETE" },
           );
           const data = await response.json();
           if (response.ok) {
@@ -522,25 +625,6 @@ export default function VotersPage() {
         }
       },
     });
-  };
-
-  const downloadCredentials = () => {
-    if (!uploadResults || !uploadResults.voters) return;
-
-    const csv = [
-      "Name,Email,Student Number,Password",
-      ...uploadResults.voters.map(
-        (v: any) => `${v.name},${v.email || ""},${v.voterId || ""},${v.password}`,
-      ),
-    ].join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `voter-credentials-${Date.now()}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
   };
 
   const downloadTemplate = () => {
@@ -575,6 +659,40 @@ export default function VotersPage() {
       voter.email?.toLowerCase().includes(search.toLowerCase()) ||
       voter.voterId?.toLowerCase().includes(search.toLowerCase()),
   );
+
+  const pendingVotersCount = voters.filter((v) => !v.credentialsSent).length;
+
+  const confirmReschedule = async () => {
+    if (!rescheduleSendAt) return;
+
+    setRescheduling(true);
+    try {
+      const response = await authFetch("/api/elections/voters/reschedule", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          electionId: selectedElection,
+          credentialsSendAt: new Date(rescheduleSendAt).toISOString(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        toast.success(data.message || "Rescheduled successfully!");
+        setShowRescheduleModal(false);
+        setRescheduleSendAt("");
+        fetchVoters();
+      } else {
+        toast.error(data.error || "Failed to reschedule credentials");
+      }
+    } catch (error) {
+      console.error("Reschedule error:", error);
+      toast.error("Failed to reschedule credentials");
+    } finally {
+      setRescheduling(false);
+    }
+  };
 
   return (
     <div>
@@ -613,6 +731,8 @@ export default function VotersPage() {
                     );
                     return;
                   }
+                  setScheduledSendAt("");
+                  setAddVoterStep(1);
                   setShowAddModal(true);
                 }}
                 disabled={isElectionEnded()}
@@ -629,12 +749,47 @@ export default function VotersPage() {
                 onClick={() => {
                   if (isElectionEnded()) {
                     toast.error(
+                      "Cannot reschedule. This election has already ended.",
+                    );
+                    return;
+                  }
+                  if (pendingVotersCount === 0) {
+                    toast.error(
+                      "No pending voters to reschedule — everyone already has credentials sent.",
+                    );
+                    return;
+                  }
+                  setRescheduleSendAt("");
+                  setShowRescheduleModal(true);
+                }}
+                disabled={isElectionEnded() || pendingVotersCount === 0}
+                title={
+                  pendingVotersCount === 0
+                    ? "No pending voters to reschedule"
+                    : `Reschedule credential delivery for ${pendingVotersCount} pending voter(s)`
+                }
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
+                  isElectionEnded() || pendingVotersCount === 0
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-white text-[#1C2338] border border-[#1C2338] hover:bg-gray-50"
+                }`}
+              >
+                <CalendarClock size={18} />
+                Reschedule
+                {pendingVotersCount > 0 ? ` (${pendingVotersCount})` : ""}
+              </button>
+              <button
+                onClick={() => {
+                  if (isElectionEnded()) {
+                    toast.error(
                       "Cannot upload voters. This election has already ended.",
                     );
                     return;
                   }
                   setPendingBulkFile(null);
                   setUploadResults(null);
+                  setBulkScheduledSendAt("");
+                  setBulkStep(1);
                   setShowBulkModal(true);
                 }}
                 disabled={isElectionEnded()}
@@ -798,6 +953,21 @@ export default function VotersPage() {
                         </span>
                       )}
                     </div>
+
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Credentials:</span>
+                      {voter.credentialsSent ? (
+                        <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-[#d4af37]">
+                          Sent
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
+                          {voter.credentialsSendAt
+                            ? `Scheduled ${new Date(voter.credentialsSendAt).toLocaleDateString()}`
+                            : "Scheduled"}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))
@@ -829,6 +999,9 @@ export default function VotersPage() {
                       Voted
                     </th>
                     <th className="text-left py-4 px-6 text-sm font-semibold text-black">
+                      Credentials
+                    </th>
+                    <th className="text-left py-4 px-6 text-sm font-semibold text-black">
                       Actions
                     </th>
                   </tr>
@@ -837,7 +1010,7 @@ export default function VotersPage() {
                   {loading ? (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center py-12 text-gray-500"
                       >
                         <div className="flex flex-col items-center gap-2">
@@ -849,7 +1022,7 @@ export default function VotersPage() {
                   ) : filteredVoters.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center py-12 text-gray-500"
                       >
                         <div className="flex flex-col items-center gap-2">
@@ -913,6 +1086,26 @@ export default function VotersPage() {
                             <span className="inline-flex items-center gap-1 text-gray-400">
                               <span className="w-2 h-2 bg-gray-400 rounded-full"></span>
                               Pending
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-6">
+                          {voter.credentialsSent ? (
+                            <span className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full bg-green-100 text-[#d4af37]">
+                              Sent
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-700"
+                              title={
+                                voter.credentialsSendAt
+                                  ? `Scheduled for ${new Date(voter.credentialsSendAt).toLocaleString()}`
+                                  : undefined
+                              }
+                            >
+                              Scheduled
+                              {voter.credentialsSendAt &&
+                                ` · ${new Date(voter.credentialsSendAt).toLocaleDateString()}`}
                             </span>
                           )}
                         </td>
@@ -989,184 +1182,260 @@ export default function VotersPage() {
               </h2>
             </div>
             <div className="p-6">
+              <StepIndicator
+                current={addVoterStep}
+                labels={["Voter Details", "Delivery & Schedule"]}
+              />
               <form onSubmit={handleAddVoter} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.name}
-                      onChange={(e) =>
-                        setFormData({ ...formData, name: e.target.value })
-                      }
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) =>
-                        setFormData({ ...formData, email: e.target.value })
-                      }
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Phone
-                    </label>
-                    <input
-                      type="tel"
-                      value={formData.phone}
-                      onChange={(e) =>
-                        setFormData({ ...formData, phone: e.target.value })
-                      }
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Student Number *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.voterId}
-                      onChange={(e) =>
-                        setFormData({ ...formData, voterId: e.target.value })
-                      }
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Department
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.department}
-                      onChange={(e) =>
-                        setFormData({ ...formData, department: e.target.value })
-                      }
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Class/Year
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.class}
-                      onChange={(e) =>
-                        setFormData({ ...formData, class: e.target.value })
-                      }
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
-                    />
-                  </div>
-                </div>
+                {addVoterStep === 1 && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Name *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.name}
+                          onChange={(e) =>
+                            setFormData({ ...formData, name: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          value={formData.email}
+                          onChange={(e) =>
+                            setFormData({ ...formData, email: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Phone
+                        </label>
+                        <input
+                          type="tel"
+                          value={formData.phone}
+                          onChange={(e) =>
+                            setFormData({ ...formData, phone: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Student Number *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.voterId}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              voterId: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Department
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.department}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              department: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Class/Year
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.class}
+                          onChange={(e) =>
+                            setFormData({ ...formData, class: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                    </div>
 
-                {/* Delivery Method Selection */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Send Credentials Via <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="deliveryMethod"
-                        value="email"
-                        checked={deliveryMethod === "email"}
-                        onChange={(e) =>
-                          setDeliveryMethod(
-                            e.target.value as "email" | "sms" | "both",
-                          )
-                        }
-                        className="w-4 h-4 text-[#d4af37]"
-                      />
-                      <span className="text-sm text-gray-700">Email Only</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="deliveryMethod"
-                        value="sms"
-                        checked={deliveryMethod === "sms"}
-                        onChange={(e) =>
-                          setDeliveryMethod(
-                            e.target.value as "email" | "sms" | "both",
-                          )
-                        }
-                        className="w-4 h-4 text-[#d4af37]"
-                      />
-                      <span className="text-sm text-gray-700">SMS Only</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="deliveryMethod"
-                        value="both"
-                        checked={deliveryMethod === "both"}
-                        onChange={(e) =>
-                          setDeliveryMethod(
-                            e.target.value as "email" | "sms" | "both",
-                          )
-                        }
-                        className="w-4 h-4 text-[#d4af37]"
-                      />
-                      <span className="text-sm text-gray-700">
-                        Both Email & SMS
-                      </span>
-                    </label>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {deliveryMethod === "email" &&
-                      "Credentials will be sent via email only. Email is required."}
-                    {deliveryMethod === "sms" &&
-                      "Credentials will be sent via SMS only. Phone number is required."}
-                    {deliveryMethod === "both" &&
-                      "Credentials will be sent via both email and SMS if available."}
-                  </p>
-                </div>
+                    <div className="flex gap-3 justify-end pt-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddModal(false);
+                          setEditingVoter(null);
+                          setScheduledSendAt("");
+                          setAddVoterStep(1);
+                          resetForm();
+                        }}
+                        className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            !formData.name.trim() ||
+                            !formData.voterId.trim()
+                          ) {
+                            toast.error("Name and Student Number are required");
+                            return;
+                          }
+                          setAddVoterStep(2);
+                        }}
+                        className="px-4 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#d4af37]"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </>
+                )}
 
-                <div className="flex gap-3 justify-end pt-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAddModal(false);
-                      setEditingVoter(null);
-                      resetForm();
-                    }}
-                    disabled={addingVoter}
-                    className="px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={addingVoter}
-                    className="px-4 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#d4af37] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    {addingVoter && (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                {addVoterStep === 2 && (
+                  <>
+                    {/* Delivery Method Selection */}
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Send Credentials Via{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <div className="flex gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="deliveryMethod"
+                            value="email"
+                            checked={deliveryMethod === "email"}
+                            onChange={(e) =>
+                              setDeliveryMethod(
+                                e.target.value as "email" | "sms" | "both",
+                              )
+                            }
+                            className="w-4 h-4 text-[#d4af37]"
+                          />
+                          <span className="text-sm text-gray-700">
+                            Email Only
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="deliveryMethod"
+                            value="sms"
+                            checked={deliveryMethod === "sms"}
+                            onChange={(e) =>
+                              setDeliveryMethod(
+                                e.target.value as "email" | "sms" | "both",
+                              )
+                            }
+                            className="w-4 h-4 text-[#d4af37]"
+                          />
+                          <span className="text-sm text-gray-700">
+                            SMS Only
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="deliveryMethod"
+                            value="both"
+                            checked={deliveryMethod === "both"}
+                            onChange={(e) =>
+                              setDeliveryMethod(
+                                e.target.value as "email" | "sms" | "both",
+                              )
+                            }
+                            className="w-4 h-4 text-[#d4af37]"
+                          />
+                          <span className="text-sm text-gray-700">
+                            Both Email & SMS
+                          </span>
+                        </label>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {deliveryMethod === "email" &&
+                          "Credentials will be sent via email only. Email is required."}
+                        {deliveryMethod === "sms" &&
+                          "Credentials will be sent via SMS only. Phone number is required."}
+                        {deliveryMethod === "both" &&
+                          "Credentials will be sent via both email and SMS if available."}
+                      </p>
+                    </div>
+
+                    {!editingVoter && (
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Send Credentials On{" "}
+                          <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="datetime-local"
+                          required
+                          value={scheduledSendAt}
+                          min={minScheduleValue}
+                          max={maxScheduleValue}
+                          onChange={(e) => setScheduledSendAt(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          The voter&apos;s login link and password are generated
+                          fresh at this exact time and delivered then — not
+                          before.
+                        </p>
+                      </div>
                     )}
-                    {addingVoter
-                      ? editingVoter
-                        ? "Updating..."
-                        : "Adding..."
-                      : editingVoter
-                      ? "Update Voter"
-                      : "Add Voter"}
-                  </button>
-                </div>
+
+                    <div className="flex gap-3 justify-end pt-4">
+                      <button
+                        type="button"
+                        onClick={() => setAddVoterStep(1)}
+                        disabled={addingVoter}
+                        className="px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={
+                          addingVoter || (!editingVoter && !scheduledSendAt)
+                        }
+                        className="px-4 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#d4af37] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {addingVoter && (
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        )}
+                        {addingVoter
+                          ? editingVoter
+                            ? "Updating..."
+                            : "Adding..."
+                          : editingVoter
+                            ? "Update Voter"
+                            : "Add Voter"}
+                      </button>
+                    </div>
+                  </>
+                )}
               </form>
             </div>
           </div>
@@ -1194,19 +1463,31 @@ export default function VotersPage() {
                     <p className="text-sm font-semibold text-green-800">
                       {uploadResults.successful} voter(s) uploaded successfully
                     </p>
+                    {uploadResults.credentialsSendAt && (
+                      <p className="text-xs text-green-700 mt-1">
+                        Credentials will be generated and sent on{" "}
+                        {new Date(
+                          uploadResults.credentialsSendAt,
+                        ).toLocaleString()}
+                        .
+                      </p>
+                    )}
                     {uploadResults.failed > 0 && (
                       <p className="text-xs text-red-600 mt-1">
-                        {uploadResults.failed} row(s) failed — see them in the voter list errors.
+                        {uploadResults.failed} row(s) failed — see them in the
+                        voter list errors.
                       </p>
                     )}
                   </div>
 
                   <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-sm font-semibold text-red-800">Uploaded the wrong file?</p>
+                      <p className="text-sm font-semibold text-red-800">
+                        Uploaded the wrong file?
+                      </p>
                       <p className="text-xs text-red-600 mt-0.5">
-                        Undo removes every voter just added by this upload. Anyone who has already
-                        voted will be kept.
+                        Undo removes every voter just added by this upload.
+                        Anyone who has already voted will be kept.
                       </p>
                     </div>
                     <button
@@ -1223,6 +1504,8 @@ export default function VotersPage() {
                       onClick={() => {
                         setShowBulkModal(false);
                         setUploadResults(null);
+                        setBulkScheduledSendAt("");
+                        setBulkStep(1);
                       }}
                       className="px-4 py-2 border rounded-lg hover:bg-gray-50"
                     >
@@ -1233,135 +1516,214 @@ export default function VotersPage() {
               ) : pendingBulkFile ? (
                 /* ── Preview (parsed, not yet submitted) ── */
                 <div className="space-y-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">{pendingBulkFile.fileName}</p>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                      {pendingBulkFile.rows.length} voter{pendingBulkFile.rows.length !== 1 ? "s" : ""} detected.
-                      Review the preview below before confirming.
-                    </p>
-                  </div>
+                  <StepIndicator
+                    current={bulkStep}
+                    labels={["Preview & Delivery", "Schedule"]}
+                  />
 
-                  {pendingBulkFile.rows.some((r) => r.phone && /0{4,}$/.test(r.phone)) && (
-                    <div className="px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-                      Some phone numbers end in several zeros — this can happen when a spreadsheet
-                      app mangles numeric columns. Double-check them before confirming.
-                    </div>
+                  {bulkStep === 1 && (
+                    <>
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">
+                          {pendingBulkFile.fileName}
+                        </p>
+                        <p className="text-sm text-gray-500 mt-0.5">
+                          {pendingBulkFile.rows.length} voter
+                          {pendingBulkFile.rows.length !== 1 ? "s" : ""}{" "}
+                          detected. Review the preview below before confirming.
+                        </p>
+                      </div>
+
+                      {pendingBulkFile.rows.some(
+                        (r) => r.phone && /0{4,}$/.test(r.phone),
+                      ) && (
+                        <div className="px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                          Some phone numbers end in several zeros — this can
+                          happen when a spreadsheet app mangles numeric columns.
+                          Double-check them before confirming.
+                        </div>
+                      )}
+
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                          <table className="w-full text-xs">
+                            <thead className="bg-gray-50 sticky top-0">
+                              <tr>
+                                {Object.keys(pendingBulkFile.rows[0]).map(
+                                  (h) => (
+                                    <th
+                                      key={h}
+                                      className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                                    >
+                                      {h}
+                                    </th>
+                                  ),
+                                )}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {pendingBulkFile.rows
+                                .slice(0, 10)
+                                .map((row, i) => (
+                                  <tr key={i}>
+                                    {Object.keys(pendingBulkFile.rows[0]).map(
+                                      (h) => (
+                                        <td
+                                          key={h}
+                                          className="px-3 py-2 text-gray-700 whitespace-nowrap"
+                                        >
+                                          {row[h] || (
+                                            <span className="text-gray-300">
+                                              —
+                                            </span>
+                                          )}
+                                        </td>
+                                      ),
+                                    )}
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {pendingBulkFile.rows.length > 10 && (
+                          <p className="text-xs text-gray-400 text-center py-2 bg-gray-50 border-t border-gray-100">
+                            + {pendingBulkFile.rows.length - 10} more row(s) not
+                            shown
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Delivery Method Selection for Bulk Upload */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Send Credentials Via{" "}
+                          <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex gap-4">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="bulkDeliveryMethod"
+                              value="email"
+                              checked={bulkDeliveryMethod === "email"}
+                              onChange={(e) =>
+                                setBulkDeliveryMethod(
+                                  e.target.value as "email" | "sms" | "both",
+                                )
+                              }
+                              className="w-4 h-4 text-[#d4af37]"
+                            />
+                            <span className="text-sm text-gray-700">
+                              Email Only
+                            </span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="bulkDeliveryMethod"
+                              value="sms"
+                              checked={bulkDeliveryMethod === "sms"}
+                              onChange={(e) =>
+                                setBulkDeliveryMethod(
+                                  e.target.value as "email" | "sms" | "both",
+                                )
+                              }
+                              className="w-4 h-4 text-[#d4af37]"
+                            />
+                            <span className="text-sm text-gray-700">
+                              SMS Only
+                            </span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="bulkDeliveryMethod"
+                              value="both"
+                              checked={bulkDeliveryMethod === "both"}
+                              onChange={(e) =>
+                                setBulkDeliveryMethod(
+                                  e.target.value as "email" | "sms" | "both",
+                                )
+                              }
+                              className="w-4 h-4 text-[#d4af37]"
+                            />
+                            <span className="text-sm text-gray-700">
+                              Both Email & SMS
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 justify-end pt-2">
+                        <button
+                          onClick={cancelPendingBulkFile}
+                          className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                        >
+                          Choose a Different File
+                        </button>
+                        <button
+                          onClick={() => setBulkStep(2)}
+                          className="px-5 py-2 bg-[#d4af37] text-white font-medium rounded-lg hover:bg-[#c19d2f]"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </>
                   )}
 
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto max-h-64 overflow-y-auto">
-                      <table className="w-full text-xs">
-                        <thead className="bg-gray-50 sticky top-0">
-                          <tr>
-                            {Object.keys(pendingBulkFile.rows[0]).map((h) => (
-                              <th key={h} className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                                {h}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {pendingBulkFile.rows.slice(0, 10).map((row, i) => (
-                            <tr key={i}>
-                              {Object.keys(pendingBulkFile.rows[0]).map((h) => (
-                                <td key={h} className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                                  {row[h] || <span className="text-gray-300">—</span>}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {pendingBulkFile.rows.length > 10 && (
-                      <p className="text-xs text-gray-400 text-center py-2 bg-gray-50 border-t border-gray-100">
-                        + {pendingBulkFile.rows.length - 10} more row(s) not shown
-                      </p>
-                    )}
-                  </div>
+                  {bulkStep === 2 && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Send Credentials On{" "}
+                          <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="datetime-local"
+                          required
+                          value={bulkScheduledSendAt}
+                          min={minScheduleValue}
+                          max={maxScheduleValue}
+                          onChange={(e) =>
+                            setBulkScheduledSendAt(e.target.value)
+                          }
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Applies to the whole batch. Each voter&apos;s login
+                          link and password are generated fresh at this exact
+                          time and delivered then — not before.
+                        </p>
+                      </div>
 
-                  {/* Delivery Method Selection for Bulk Upload */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Send Credentials Via <span className="text-red-500">*</span>
-                    </label>
-                    <div className="flex gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="bulkDeliveryMethod"
-                          value="email"
-                          checked={bulkDeliveryMethod === "email"}
-                          onChange={(e) =>
-                            setBulkDeliveryMethod(
-                              e.target.value as "email" | "sms" | "both",
-                            )
-                          }
-                          className="w-4 h-4 text-[#d4af37]"
-                        />
-                        <span className="text-sm text-gray-700">Email Only</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="bulkDeliveryMethod"
-                          value="sms"
-                          checked={bulkDeliveryMethod === "sms"}
-                          onChange={(e) =>
-                            setBulkDeliveryMethod(
-                              e.target.value as "email" | "sms" | "both",
-                            )
-                          }
-                          className="w-4 h-4 text-[#d4af37]"
-                        />
-                        <span className="text-sm text-gray-700">SMS Only</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="bulkDeliveryMethod"
-                          value="both"
-                          checked={bulkDeliveryMethod === "both"}
-                          onChange={(e) =>
-                            setBulkDeliveryMethod(
-                              e.target.value as "email" | "sms" | "both",
-                            )
-                          }
-                          className="w-4 h-4 text-[#d4af37]"
-                        />
-                        <span className="text-sm text-gray-700">
-                          Both Email & SMS
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3 justify-end pt-2">
-                    <button
-                      onClick={cancelPendingBulkFile}
-                      disabled={uploadingBulk}
-                      className="px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Choose a Different File
-                    </button>
-                    <button
-                      onClick={confirmBulkUpload}
-                      disabled={uploadingBulk}
-                      className="px-5 py-2 bg-[#d4af37] text-white font-medium rounded-lg hover:bg-[#c19d2f] disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {uploadingBulk
-                        ? "Uploading…"
-                        : `Confirm & Upload ${pendingBulkFile.rows.length} Voter${pendingBulkFile.rows.length !== 1 ? "s" : ""}`}
-                    </button>
-                  </div>
+                      <div className="flex gap-3 justify-end pt-2">
+                        <button
+                          onClick={() => setBulkStep(1)}
+                          disabled={uploadingBulk}
+                          className="px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Back
+                        </button>
+                        <button
+                          onClick={confirmBulkUpload}
+                          disabled={uploadingBulk || !bulkScheduledSendAt}
+                          className="px-5 py-2 bg-[#d4af37] text-white font-medium rounded-lg hover:bg-[#c19d2f] disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {uploadingBulk
+                            ? "Uploading…"
+                            : `Confirm & Upload ${pendingBulkFile.rows.length} Voter${pendingBulkFile.rows.length !== 1 ? "s" : ""}`}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 /* ── File picker (nothing chosen yet) ── */
                 <div className="space-y-6">
                   <div>
                     <p className="text-sm text-gray-600 mb-4">
-                      Upload a CSV file with voter information. The file should have
-                      the following columns:
+                      Upload a CSV file with voter information. The file should
+                      have the following columns:
                     </p>
 
                     <button
@@ -1407,7 +1769,65 @@ export default function VotersPage() {
           </div>
         </div>
       )}
-      
+
+      {/* Reschedule Modal */}
+      {showRescheduleModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full">
+            <div className="bg-[#1C2338] text-white px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between rounded-t-lg">
+              <h3 className="text-lg font-semibold">
+                Reschedule Credential Delivery
+              </h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                {pendingVotersCount} voter{pendingVotersCount !== 1 ? "s" : ""}{" "}
+                in <strong>{selectedElectionData?.title}</strong>{" "}
+                {pendingVotersCount !== 1 ? "haven't" : "hasn't"} had
+                credentials sent yet. Pick a new date/time to send them at —
+                this replaces whatever time was set before.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  New Send Date/Time <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={rescheduleSendAt}
+                  min={minScheduleValue}
+                  max={maxScheduleValue}
+                  onChange={(e) => setRescheduleSendAt(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                />
+              </div>
+              <div className="flex gap-3 justify-end pt-2">
+                <button
+                  onClick={() => {
+                    setShowRescheduleModal(false);
+                    setRescheduleSendAt("");
+                  }}
+                  disabled={rescheduling}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmReschedule}
+                  disabled={rescheduling || !rescheduleSendAt}
+                  className="px-4 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#d4af37] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {rescheduling && (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  )}
+                  {rescheduling ? "Rescheduling…" : "Reschedule"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Alert Modal */}
       <AlertModal
         isOpen={alertModal.isOpen}
@@ -1416,7 +1836,7 @@ export default function VotersPage() {
         message={alertModal.message}
         type={alertModal.type}
       />
-      
+
       {/* Confirm Modal */}
       <ConfirmModal
         isOpen={confirmModal.isOpen}
@@ -1432,14 +1852,18 @@ export default function VotersPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-md w-full shadow-xl">
             <div className="bg-[#d4af37] p-4 rounded-t-xl">
-              <h2 className="text-lg font-bold text-white">Resend Credentials</h2>
+              <h2 className="text-lg font-bold text-white">
+                Resend Credentials
+              </h2>
               <p className="text-blue-100 text-sm mt-1">
                 Update contact info and resend login credentials
               </p>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Voter Name</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Voter Name
+                </label>
                 <input
                   type="text"
                   value={resendModalData.voterName}
@@ -1448,24 +1872,32 @@ export default function VotersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email
+                </label>
                 <input
                   type="email"
                   value={resendModalData.voterEmail || "—"}
                   disabled
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 text-gray-500 cursor-not-allowed"
                 />
-                <p className="text-xs text-gray-400 mt-1">Email cannot be changed here</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Email cannot be changed here
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Phone Number <span className="text-[#d4af37]">(editable)</span>
+                  Phone Number{" "}
+                  <span className="text-[#d4af37]">(editable)</span>
                 </label>
                 <input
                   type="tel"
                   value={resendModalData.editPhone}
                   onChange={(e) =>
-                    setResendModalData({ ...resendModalData, editPhone: e.target.value })
+                    setResendModalData({
+                      ...resendModalData,
+                      editPhone: e.target.value,
+                    })
                   }
                   placeholder="e.g. 0241234567"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#1C2338] outline-none"
@@ -1476,7 +1908,10 @@ export default function VotersPage() {
               </div>
               <div className="flex gap-3 pt-2">
                 <button
-                  onClick={() => { setShowResendModal(false); setResendModalData(null); }}
+                  onClick={() => {
+                    setShowResendModal(false);
+                    setResendModalData(null);
+                  }}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-sm font-medium"
                 >
                   Cancel

@@ -9,14 +9,12 @@ export interface IVoter extends Document {
   voterId?: string;
   token: string;
   password: string;
-  // Secure one-click voting link identifier — an HMAC of (token + password hash),
-  // so it's unique per voter and automatically rotates whenever the password
-  // is regenerated (e.g. on resend). Looked up directly; never reversed.
   linkHash?: string;
   linkExpiresAt?: Date;
-  // Groups voters created together in one bulk-upload request, so a
-  // mistaken upload (wrong file/wrong election) can be undone as a unit.
   importBatchId?: string;
+  credentialsSendAt?: Date;
+  credentialsSent: boolean;
+  credentialsDeliveryMethod?: 'email' | 'sms' | 'both';
   hasVoted: boolean;
   votedAt?: Date;
   status: 'active' | 'expired' | 'disabled';
@@ -85,6 +83,17 @@ const VoterSchema: Schema = new Schema(
       type: String,
       index: true,
     },
+    credentialsSendAt: {
+      type: Date,
+    },
+    credentialsSent: {
+      type: Boolean,
+      default: true,
+    },
+    credentialsDeliveryMethod: {
+      type: String,
+      enum: ['email', 'sms', 'both'],
+    },
     hasVoted: {
       type: Boolean,
       default: false,
@@ -112,6 +121,8 @@ const VoterSchema: Schema = new Schema(
 VoterSchema.index({ electionId: 1, email: 1 }, { unique: true, sparse: true });
 VoterSchema.index({ electionId: 1, phone: 1 }, { unique: true, sparse: true });
 VoterSchema.index({ electionId: 1, voterId: 1 }, { unique: true, sparse: true });
+// Backs the scheduled-credentials sweep's due-voters query.
+VoterSchema.index({ credentialsSent: 1, credentialsSendAt: 1 });
 
 if (mongoose.models.Voter) {
   delete mongoose.models.Voter;
@@ -119,12 +130,6 @@ if (mongoose.models.Voter) {
 
 const Voter: Model<IVoter> = mongoose.model<IVoter>('Voter', VoterSchema);
 
-// Drop any stale global unique indexes (e.g. on email/phone alone) that would
-// incorrectly block the same voter from appearing in multiple elections.
-// This module is imported (and this code runs) before connectDB()'s
-// mongoose.connect() has necessarily resolved — with bufferCommands: false,
-// calling syncIndexes() before the connection is open throws (no db handle
-// yet), so wait for the 'connected' event when that's the case.
 function syncVoterIndexes() {
   Voter.syncIndexes().catch((err) =>
     console.error('Voter.syncIndexes error:', err)

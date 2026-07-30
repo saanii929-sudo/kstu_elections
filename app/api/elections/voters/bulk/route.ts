@@ -5,9 +5,7 @@ import Voter from '@/models/Voter';
 import ElectionVote from '@/models/ElectionVote';
 import { verifyToken } from '@/lib/auth';
 import { hashPassword } from '@/lib/auth';
-import { sendEmail } from '@/lib/email';
-import { sendVoterCredentialsSms } from '@/services/sms.service';
-import { generateVoterLinkHash, buildVoterLoginUrl } from '@/lib/voterLink';
+import { generateVoterLinkHash } from '@/lib/voterLink';
 import { logAudit } from '@/lib/auditLog';
 import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 
@@ -81,144 +79,6 @@ function generatePassword(): string {
   return picks.join('');
 }
 
-async function sendVoterCredentials(
-  email: string,
-  name: string,
-  studentId: string,
-  password: string,
-  electionTitle: string,
-  startDate: Date,
-  endDate: Date,
-  secureLink: string
-): Promise<boolean> {
-  const loginUrl = secureLink;
-  const formatDate = (date: Date) => {
-    return new Date(date).toLocaleString('en-GB', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
-
-  const startDateFormatted = formatDate(startDate);
-  const endDateFormatted = formatDate(endDate);
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
-        .content { background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
-        .credentials-box { background: white; border: 2px solid #16a34a; padding: 20px; margin: 20px 0; border-radius: 8px; }
-        .credential-item { margin: 15px 0; }
-        .credential-label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; }
-        .credential-value { font-size: 24px; font-weight: bold; color: #16a34a; font-family: monospace; letter-spacing: 2px; }
-        .button { display: inline-block; background: #16a34a; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; margin: 20px 0; font-weight: bold; font-size: 16px; }
-        .footer { text-align: center; margin-top: 30px; color: #6b7280; font-size: 14px; }
-        .warning { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; }
-        .info-box { background: #e0e7ff; border-left: 4px solid #6366f1; padding: 15px; margin: 20px 0; }
-        .date-box { background: #dcfce7; border-left: 4px solid #16a34a; padding: 15px; margin: 20px 0; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>🗳️ You&#39;re Invited to Vote</h1>
-        </div>
-        <div class="content">
-          <h2>Hello ${name},</h2>
-          <p>You have been registered as a voter for <strong>${electionTitle}</strong>.</p>
-
-          <div class="date-box">
-            <p style="margin: 0; font-size: 14px;"><strong>📅 Election Period:</strong></p>
-            <p style="margin: 5px 0 0 0; font-size: 14px;">
-              <strong>Start:</strong> ${startDateFormatted}<br>
-              <strong>End:</strong> ${endDateFormatted}
-            </p>
-          </div>
-
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${loginUrl}" class="button" style="color: white;">
-              🗳️ Start Voting
-            </a>
-          </div>
-
-          <div class="info-box">
-            <strong>📍 Your Secure Voting Link:</strong><br>
-            <a href="${loginUrl}" style="color: #6366f1; word-break: break-all;">${loginUrl}</a>
-          </div>
-
-          <div class="credentials-box">
-            <p style="text-align: center; margin-bottom: 20px; color: #6b7280;">After clicking the link, sign in with:</p>
-
-            <div class="credential-item">
-              <div class="credential-label">Student Number</div>
-              <div class="credential-value">${studentId}</div>
-            </div>
-
-            <div class="credential-item">
-              <div class="credential-label">Password</div>
-              <div class="credential-value">${password}</div>
-            </div>
-          </div>
-
-          <div class="warning">
-            <strong>⚠️ Important:</strong> This link and these credentials are unique to you — do not share them. They expire automatically once the election ends.
-          </div>
-
-          <p style="margin-top: 30px;">If you have any questions, please contact the election organizers.</p>
-
-          <p>Best regards,<br>Election Management Team</p>
-        </div>
-        <div class="footer">
-          <p>This is an automated message. Please do not reply to this email.</p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
-
-  const text = `
-    Hello ${name},
-
-    You have been registered as a voter for ${electionTitle}.
-
-    ELECTION PERIOD:
-    Start: ${startDateFormatted}
-    End: ${endDateFormatted}
-
-    Your secure voting link: ${loginUrl}
-
-    After clicking the link, sign in with:
-    Student Number: ${studentId}
-    Password: ${password}
-
-    This link and these credentials are unique to you — do not share them.
-    They expire automatically once the election ends.
-
-    Best regards,
-    Election Management Team
-  `;
-
-  try {
-    return await sendEmail({
-      to: email,
-      subject: `Your Voting Credentials - ${electionTitle}`,
-      html,
-      text,
-    });
-  } catch (error) {
-    console.error(`Failed to send email to ${email}:`, error);
-    return false;
-  }
-}
 
 async function generateUniqueToken(existingTokens: Set<string>): Promise<string> {
   let token = generateToken();
@@ -246,7 +106,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { electionId, voters, deliveryMethod = 'both' } = body;
+    const { electionId, voters, deliveryMethod = 'both', credentialsSendAt } = body;
 
     if (!electionId || !voters || !Array.isArray(voters) || voters.length === 0) {
       return NextResponse.json(
@@ -276,6 +136,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Sending is always scheduled, never immediate — one date/time applies
+    // to the whole batch (see lib/scheduledVoterCredentials.ts).
+    if (!credentialsSendAt) {
+      return NextResponse.json(
+        { error: 'A credentials send date/time is required' },
+        { status: 400 }
+      );
+    }
+    const sendAt = new Date(credentialsSendAt);
+    if (isNaN(sendAt.getTime()) || sendAt <= now) {
+      return NextResponse.json(
+        { error: 'Credentials send date/time must be in the future' },
+        { status: 400 }
+      );
+    }
+    if (sendAt > endDate) {
+      return NextResponse.json(
+        { error: 'Credentials send date/time must be before the election ends' },
+        { status: 400 }
+      );
+    }
+
     const existingVoters = await Voter.find({ electionId }, { email: 1, phone: 1, voterId: 1 }).lean();
     const existingEmails = new Set(existingVoters.map((v: any) => v.email).filter(Boolean));
     const existingPhones = new Set(existingVoters.map((v: any) => v.phone).filter(Boolean));
@@ -293,7 +175,6 @@ export async function POST(req: NextRequest) {
         name: string;
         token: string;
         voterId: string;
-        password: string;
         email?: string;
         phone?: string;
         linkHash: string;
@@ -389,9 +270,13 @@ export async function POST(req: NextRequest) {
           batchPhones.add(phoneNumber);
         }
         const voterToken = await generateUniqueToken(existingTokens);
-        const password = generatePassword();
-        const hashedPassword = await hashPassword(password);
-        const linkHash = generateVoterLinkHash(voterToken, hashedPassword);
+        // Throwaway password/link — never revealed anywhere. The real one
+        // is generated fresh right before actual delivery, at
+        // credentialsSendAt (see lib/scheduledVoterCredentials.ts). This
+        // one only exists to satisfy the schema until then.
+        const placeholderPassword = generatePassword();
+        const hashedPlaceholder = await hashPassword(placeholderPassword);
+        const linkHash = generateVoterLinkHash(voterToken, hashedPlaceholder);
 
         votersToCreate.push({
           electionId,
@@ -402,7 +287,7 @@ export async function POST(req: NextRequest) {
           phone: phoneNumber,
           voterId: vidStr,
           token: voterToken,
-          password: hashedPassword,
+          password: hashedPlaceholder,
           linkHash,
           linkExpiresAt: election.endDate,
           importBatchId: batchId,
@@ -414,6 +299,9 @@ export async function POST(req: NextRequest) {
           },
           status: 'active',
           hasVoted: false,
+          credentialsSendAt: sendAt,
+          credentialsSent: false,
+          credentialsDeliveryMethod: deliveryMethod,
         });
 
         results.success.push({
@@ -421,7 +309,6 @@ export async function POST(req: NextRequest) {
           name: voterData.name,
           token: voterToken,
           voterId: vidStr,
-          password: password,
           email: voterData.email,
           phone: phoneNumber || undefined,
           linkHash,
@@ -468,68 +355,6 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    let emailsSent = 0;
-    let emailsFailed = 0;
-    let smsSent = 0;
-    let smsFailed = 0;
-
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-
-    if (results.success.length > 0) {
-      for (const voter of results.success) {
-        const secureLink = buildVoterLoginUrl(baseUrl, voter.linkHash);
-
-        if (voter.email && (deliveryMethod === 'email' || deliveryMethod === 'both')) {
-          try {
-            const emailSent = await sendVoterCredentials(
-              voter.email,
-              voter.name,
-              voter.voterId,
-              voter.password,
-              election.title,
-              election.startDate,
-              election.endDate,
-              secureLink
-            );
-
-            if (emailSent) {
-              emailsSent++;
-            } else {
-              emailsFailed++;
-            }
-          } catch (emailError) {
-            console.error(`Failed to send email to ${voter.email}:`, emailError);
-            emailsFailed++;
-          }
-        }
-
-        if (voter.phone && (deliveryMethod === 'sms' || deliveryMethod === 'both')) {
-          try {
-            const smsSentSuccess = await sendVoterCredentialsSms(
-              voter.phone,
-              voter.name,
-              voter.voterId,
-              voter.password,
-              election.title,
-              election.startDate,
-              election.endDate,
-              secureLink,
-              election.alias
-            );
-
-            if (smsSentSuccess) {
-              smsSent++;
-            } else {
-              smsFailed++;
-            }
-          } catch (smsError) {
-            console.error(`Failed to send SMS to ${voter.phone}:`, smsError);
-            smsFailed++;
-          }
-        }
-      }
-    }
-
     if (results.success.length > 0) {
       await logAudit({
         actor: { id: decoded.id, email: decoded.email, role: decoded.role },
@@ -542,15 +367,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Successfully added ${results.success.length} voters. Emails: ${emailsSent} sent${emailsFailed > 0 ? `, ${emailsFailed} failed` : ''}. SMS: ${smsSent} sent${smsFailed > 0 ? `, ${smsFailed} failed` : ''}`,
+      message: `Successfully added ${results.success.length} voters. Credentials will be sent on ${sendAt.toLocaleString()}.`,
       data: {
         total: voters.length,
         successful: results.success.length,
         failed: results.failed.length,
-        emailsSent,
-        emailsFailed,
-        smsSent,
-        smsFailed,
+        credentialsSendAt: sendAt,
         voters: results.success,
         errors: results.failed,
         batchId: results.success.length > 0 ? batchId : undefined,

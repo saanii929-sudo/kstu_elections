@@ -293,11 +293,11 @@ export default function CandidatesPage() {
                             </div>
 
                             {candidate.image ? (
-                              <div className="w-full h-60 bg-gray-100 overflow-hidden">
+                              <div className="w-full h-60 bg-white overflow-hidden">
                                 <img
                                   src={candidate.image}
                                   alt={candidate.name}
-                                  className="w-full h-full object-cover object-top"
+                                  className="w-full h-full object-contain object-top"
                                 />
                               </div>
                             ) : (

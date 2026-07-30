@@ -104,7 +104,7 @@ function VotingPageContent() {
       ...prev,
       [categoryId]: null,
     }));
-    toast.success("Position skipped");
+    toast.success("Position No");
   };
 
   const handleNextStep = () => {
@@ -272,8 +272,8 @@ function VotingPageContent() {
               const isSkipped = selectedVotes[category._id] === null;
 
               return (
-                <div className="bg-white rounded-xl border border-gray-200">
-                  <div className="bg-linear-to-r from-[#d4af37] to-[#d4af37] text-white p-6 rounded-t-xl">
+                <div className="bg-white  rounded-xl border border-gray-200">
+                  <div className="bg-linear-to-r from-[#1c2338] to-[#1c2338] text-white p-6 rounded-t-xl">
                     <div className="flex items-center gap-3 mb-2">
                       <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center font-bold text-lg">
                         {currentStep + 1}
@@ -331,7 +331,7 @@ function VotingPageContent() {
                                       <img
                                         src={candidate.image}
                                         alt={candidate.name}
-                                        className={`w-36 h-44 rounded-xl object-cover object-top border-4 transition-all ${
+                                        className={`w-36 h-50 rounded-xl object-contain object-top border-4 transition-all ${
                                           isSelected
                                             ? "border-[#d4af37] shadow-xl"
                                             : "border-gray-200 group-hover:border-[#d4af37]"
@@ -358,12 +358,15 @@ function VotingPageContent() {
                                     </div>
                                   </div>
                                   
-                                  {isSelected && (
+                                  {isSelected ? (
                                     <div className="flex items-center justify-center gap-2 bg-[#d4af37] text-white py-2 rounded-lg font-semibold">
                                       <CheckCircle size={20} />
                                       <span>Selected</span>
                                     </div>
-                                  )}
+                                  ): (<div className="flex items-center justify-center gap-2 bg-[#ebdeb2] text-white py-2 rounded-lg font-semibold">
+                                      
+                                      <span>Select</span>
+                                    </div>)}
                                 </button>
 
                                 <button
@@ -389,7 +392,7 @@ function VotingPageContent() {
                                     {isSkipped && (
                                       <div className="flex items-center justify-center gap-2 bg-[#d4af37] text-white py-2 px-4 rounded-lg font-semibold">
                                         <CheckCircle size={20} />
-                                        <span>Skipped</span>
+                                        <span>Selected</span>
                                       </div>
                                     )}
                                   </div>
@@ -574,7 +577,7 @@ function VotingPageContent() {
                           )}
                         </div>
                       ) : isSkipped ? (
-                        <p className="text-sm text-gray-400 mt-1 italic">Skipped</p>
+                        <p className="text-sm text-gray-400 mt-1 italic">No</p>
                       ) : (
                         <p className="text-sm text-orange-600 mt-1">Not selected</p>
                       )}
@@ -595,7 +598,7 @@ function VotingPageContent() {
 
             <p className="text-xs text-center text-gray-500 mb-4">
               {Object.values(selectedVotes).filter((v) => v !== null).length} vote(s) selected ·{" "}
-              {Object.values(selectedVotes).filter((v) => v === null).length} skipped
+              {Object.values(selectedVotes).filter((v) => v === null).length} No
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
