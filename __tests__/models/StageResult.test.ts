@@ -170,7 +170,7 @@ describe('StageResult Model - Immutability', () => {
       const updatePromise = StageResult.findOneAndUpdate(
         { _id: savedResult._id },
         { $set: { totalVotes: 200, immutable: false } },
-        { new: true }
+        { returnDocument: 'after' }
       );
 
       await expect(updatePromise).rejects.toThrow('Cannot modify immutable stage result');

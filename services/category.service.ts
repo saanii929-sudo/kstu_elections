@@ -49,7 +49,7 @@ export class CategoryService {
     await connectDB();
     
     const category = await Category.findByIdAndUpdate(categoryId, data, {
-      new: true,
+      returnDocument: 'after',
       runValidators: true,
     });
     
@@ -76,7 +76,7 @@ export class CategoryService {
     const category = await Category.findByIdAndUpdate(
       categoryId,
       { status: 'published' },
-      { new: true }
+      { returnDocument: 'after' }
     );
     
     if (!category) {

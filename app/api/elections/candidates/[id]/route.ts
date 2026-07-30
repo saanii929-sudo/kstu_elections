@@ -46,7 +46,7 @@ export async function PUT(
     const updatedCandidate = await Candidate.findByIdAndUpdate(
       id,
       updateData,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     ).populate('categoryId', 'name');
 
     return NextResponse.json({

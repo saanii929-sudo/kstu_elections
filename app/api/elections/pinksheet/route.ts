@@ -76,7 +76,7 @@ export async function PUT(req: NextRequest) {
           ...(decisions !== undefined && { decisions }),
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // Mixed fields need markModified to guarantee Mongoose flushes the change

@@ -202,7 +202,7 @@ export async function PUT(
     const updatedVoter = await Voter.findByIdAndUpdate(
       id,
       updateData,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
 
     // If email was updated and voter hasn't voted, send credentials

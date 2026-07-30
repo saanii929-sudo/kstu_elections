@@ -15,38 +15,6 @@ export default function NotFound() {
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
-      <nav className="bg-white sticky border-b border-gray-200 top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <Link href="/" className="flex relative items-center">
-              <Image
-                src="/images/logo.png"
-                alt="Pawavotes"
-                width={70}
-                height={70}
-              />
-              <span className="text-xl absolute left-15 top-5 font-semibold text-green-600">
-                Pawavotes
-              </span>
-            </Link>
-            <div className="hidden sm:flex items-center gap-6">
-              {[
-                { label: "Home", href: "/" },
-                { label: "Ticketing", href: "/ticketing" },
-                { label: "Events", href: "/find-vote" },
-              ].map((l) => (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className="text-sm text-gray-600 hover:text-green-600 transition-colors"
-                >
-                  {l.label}
-                </Link>
-              ))}
-            </div>
-          </div>
-        </div>
-      </nav>
       <div className="flex-1 flex items-center justify-center px-6 py-16">
         <div
           className={`max-w-lg w-full text-center transition-all duration-600 ease-out ${

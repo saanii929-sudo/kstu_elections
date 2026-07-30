@@ -131,7 +131,7 @@ export async function PUT(
     const updatedAdmin = await OrganizationAdmin.findByIdAndUpdate(
       id,
       { $set: updateData },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     )
       .select('-password');
 

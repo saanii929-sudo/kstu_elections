@@ -27,7 +27,7 @@ export async function checkRateLimit(
     let doc = await RateLimitCounter.findOneAndUpdate(
       { key, resetTime: { $gt: now } },
       { $inc: { count: 1 } },
-      { new: true }
+      { returnDocument: 'after' }
     ).lean<{ count: number; resetTime: Date } | null>();
 
     if (!doc) {
@@ -40,14 +40,14 @@ export async function checkRateLimit(
         doc = await RateLimitCounter.findOneAndUpdate(
           { key },
           { $set: { count: 1, resetTime } },
-          { new: true, upsert: true }
+          { returnDocument: 'after', upsert: true }
         ).lean<{ count: number; resetTime: Date } | null>();
       } catch (err: any) {
         if (err?.code === 11000) {
           doc = await RateLimitCounter.findOneAndUpdate(
             { key },
             { $inc: { count: 1 } },
-            { new: true }
+            { returnDocument: 'after' }
           ).lean<{ count: number; resetTime: Date } | null>();
         } else {
           throw err;

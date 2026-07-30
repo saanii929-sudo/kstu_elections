@@ -44,7 +44,7 @@ export async function PUT(
     const updatedCategory = await ElectionCategory.findByIdAndUpdate(
       id,
       updateData,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
 
     return NextResponse.json({

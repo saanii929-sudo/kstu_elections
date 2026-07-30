@@ -84,7 +84,7 @@ export async function PUT(
     const updatedElection = await Election.findByIdAndUpdate(
       id,
       updateData,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
 
     return NextResponse.json({

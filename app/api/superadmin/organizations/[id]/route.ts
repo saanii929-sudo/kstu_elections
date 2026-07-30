@@ -64,7 +64,7 @@ async function updateOrganization(
     const organization = await Organization.findByIdAndUpdate(
       id,
       updateData,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     ).select('-password');
 
     if (!organization) {

@@ -68,7 +68,7 @@ async function updateAdmin(
     }
 
     const admin = await Admin.findByIdAndUpdate(id, updateData, {
-      new: true,
+      returnDocument: 'after',
       runValidators: true,
     }).select('-password');
 

@@ -61,7 +61,7 @@ export class OrganizationAdminService {
     await connectDB();
     
     const orgAdmin = await OrganizationAdmin.findByIdAndUpdate(id, data, {
-      new: true,
+      returnDocument: 'after',
       runValidators: true,
     });
     

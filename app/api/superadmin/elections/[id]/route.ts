@@ -28,7 +28,7 @@ async function updateApproval(
     const election = await Election.findByIdAndUpdate(
       id,
       { [field]: decision },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
 
     if (!election) {

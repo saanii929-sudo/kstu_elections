@@ -83,7 +83,7 @@ export async function PUT(req: NextRequest) {
     const organization = await Organization.findByIdAndUpdate(
       decoded.id,
       updateData,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     ).select('-password');
 
     if (!organization) {

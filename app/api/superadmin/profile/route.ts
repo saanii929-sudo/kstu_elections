@@ -59,7 +59,7 @@ export async function PUT(req: NextRequest) {
     const { password, role, status, assignedElections, ...updateData } = body;
 
     const admin = await Admin.findByIdAndUpdate(decoded.id, updateData, {
-      new: true,
+      returnDocument: 'after',
       runValidators: true,
     }).select('-password');
 
