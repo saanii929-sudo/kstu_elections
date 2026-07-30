@@ -5,19 +5,18 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    # MONGODB_URI comes entirely from .env below, not an `environment:`
+    # override here — docker-compose lets environment: silently win over
+    # env_file: for the same key, which previously meant a hardcoded
+    # MONGODB_URI here always overrode whatever .env correctly had, no
+    # matter what. Set MONGODB_URI in .env directly: inside this compose
+    # network the database is reachable at the service name "mongo", not
+    # localhost — e.g. mongodb://mongo:27017/<db> with no auth, or
+    # mongodb://user:pass@mongo:27017/<db>?authSource=admin once auth is
+    # enabled on the mongo service below (both must use the SAME
+    # credentials — see MONGO_ROOT_USERNAME/PASSWORD there).
     env_file:
       - .env
-    environment:
-      # Overrides whatever MONGODB_URI is set to in .env — inside this
-      # compose network the database is reachable at the service name
-      # "mongo", not localhost. Point elsewhere (e.g. MongoDB Atlas), or
-      # once you've enabled Mongo auth below, by deleting this line and
-      # setting the full MONGODB_URI (with credentials + ?authSource=admin)
-      # in .env instead — deliberately NOT interpolated here from
-      # MONGO_ROOT_USERNAME/PASSWORD, so that setting those to enable auth
-      # on the mongo service below can never silently break this app's
-      # connection string on a redeploy you didn't intend to touch this on.
-      MONGODB_URI: mongodb://mongo:27017/pawavotes
     depends_on:
       mongo:
         condition: service_healthy
