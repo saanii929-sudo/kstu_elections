@@ -162,17 +162,19 @@ export function startScheduledVoterCredentialsJob(): void {
   if (global.__scheduledVoterCredentialsJobStarted) return;
   global.__scheduledVoterCredentialsJobStarted = true;
 
+  console.log(`[scheduler] background sweep starting, every ${SWEEP_INTERVAL_MS / 1000}s`);
+
   setInterval(() => {
-    processDueScheduledVoterCredentials().catch((err) =>
-      console.error('Scheduled voter credentials sweep errored:', err)
-    );
+    processDueScheduledVoterCredentials()
+      .then((result) => console.log(`[scheduler] tick ${new Date().toISOString()} — processed ${result.processed}`))
+      .catch((err) => console.error('Scheduled voter credentials sweep errored:', err));
   }, SWEEP_INTERVAL_MS);
 
   // Also run shortly after startup, in case something came due while the
   // server was down or mid-deploy.
   setTimeout(() => {
-    processDueScheduledVoterCredentials().catch((err) =>
-      console.error('Initial scheduled voter credentials sweep errored:', err)
-    );
+    processDueScheduledVoterCredentials()
+      .then((result) => console.log(`[scheduler] startup sweep — processed ${result.processed}`))
+      .catch((err) => console.error('Initial scheduled voter credentials sweep errored:', err));
   }, 5000);
 }

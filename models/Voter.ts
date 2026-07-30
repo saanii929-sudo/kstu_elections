@@ -49,6 +49,7 @@ const VoterSchema: Schema = new Schema(
       type: String,
       trim: true,
       lowercase: true,
+      unique: false,
     },
     phone: {
       type: String,
@@ -118,7 +119,6 @@ const VoterSchema: Schema = new Schema(
 
 // Compound unique indexes — uniqueness is scoped per election.
 // The same email/phone/voterId is allowed across different elections.
-VoterSchema.index({ electionId: 1, email: 1 }, { unique: true, sparse: true });
 VoterSchema.index({ electionId: 1, phone: 1 }, { unique: true, sparse: true });
 VoterSchema.index({ electionId: 1, voterId: 1 }, { unique: true, sparse: true });
 // Backs the scheduled-credentials sweep's due-voters query.
