@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
+import Script from "next/script";
 import {
   Lock,
   IdCard,
@@ -36,6 +37,28 @@ const fadeUp = {
 
 type PageStatus = "verifying" | "login-form" | "error" | "not-started";
 
+// Unset in dev/self-hosted setups without a Cloudflare account yet — the
+// widget simply doesn't render and the server-side check fails open (see
+// lib/turnstile.ts), so this never blocks login on its own.
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (
+        container: HTMLElement,
+        options: {
+          sitekey: string;
+          callback: (token: string) => void;
+          "expired-callback"?: () => void;
+          "error-callback"?: () => void;
+        }
+      ) => string;
+      reset: (widgetId?: string) => void;
+    };
+  }
+}
+
 function VoterLoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -54,6 +77,13 @@ function VoterLoginPageInner() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
+
+  // Cloudflare Turnstile bot check — gates only the credential submission,
+  // not the initial link-verify step.
+  const [turnstileReady, setTurnstileReady] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Tracks the voter's canonical token once known, for the OTP step
   const [activeVoterToken, setActiveVoterToken] = useState("");
@@ -102,6 +132,22 @@ function VoterLoginPageInner() {
     const id = setInterval(() => setResendCooldown((c) => c - 1), 1000);
     return () => clearInterval(id);
   }, [resendCooldown]);
+
+  // Render the Turnstile widget once its script has loaded and the login
+  // form is showing. Explicit render (not the auto data-sitekey div) so we
+  // keep a widget id to reset() on a failed submit.
+  useEffect(() => {
+    if (status !== "login-form" || !turnstileReady || !TURNSTILE_SITE_KEY) return;
+    if (!turnstileContainerRef.current || turnstileWidgetIdRef.current) return;
+    if (!window.turnstile) return;
+
+    turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
+      sitekey: TURNSTILE_SITE_KEY,
+      callback: (token) => setTurnstileToken(token),
+      "expired-callback": () => setTurnstileToken(""),
+      "error-callback": () => setTurnstileToken(""),
+    });
+  }, [status, turnstileReady]);
 
   const otpValue = digits.join("");
 
@@ -189,8 +235,21 @@ function VoterLoginPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkHash]);
 
+  const resetTurnstile = () => {
+    if (TURNSTILE_SITE_KEY && window.turnstile && turnstileWidgetIdRef.current) {
+      window.turnstile.reset(turnstileWidgetIdRef.current);
+    }
+    setTurnstileToken("");
+  };
+
   const handleLoginSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (TURNSTILE_SITE_KEY && !turnstileToken) {
+      toast.error("Please complete the verification challenge.");
+      return;
+    }
+
     setLoginLoading(true);
     const loadingToast = toast.loading("Verifying credentials...");
 
@@ -202,6 +261,7 @@ function VoterLoginPageInner() {
           linkHash,
           studentId: studentId.trim(),
           password: password.trim(),
+          turnstileToken,
         }),
       });
 
@@ -215,12 +275,15 @@ function VoterLoginPageInner() {
           id: loadingToast,
           duration: 4000,
         });
+        // Turnstile tokens are single-use — get a fresh one for the retry.
+        resetTurnstile();
       }
     } catch {
       toast.error("Network error. Please try again.", {
         id: loadingToast,
         duration: 4000,
       });
+      resetTurnstile();
     } finally {
       setLoginLoading(false);
     }
@@ -327,6 +390,14 @@ function VoterLoginPageInner() {
 
   return (
     <>
+      {TURNSTILE_SITE_KEY && (
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+          strategy="afterInteractive"
+          onLoad={() => setTurnstileReady(true)}
+        />
+      )}
+
       <Toaster
         position="top-center"
         toastOptions={{
@@ -486,11 +557,17 @@ function VoterLoginPageInner() {
                   </div>
                 </div>
 
+                {TURNSTILE_SITE_KEY && (
+                  <div className="flex justify-center">
+                    <div ref={turnstileContainerRef} />
+                  </div>
+                )}
+
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   type="submit"
-                  disabled={loginLoading}
+                  disabled={loginLoading || (!!TURNSTILE_SITE_KEY && !turnstileToken)}
                   className="w-full rounded-lg bg-[#D4AF37] py-3 font-semibold text-white hover:bg-[#D4AF37] disabled:opacity-60 transition"
                 >
                   {loginLoading ? "Verifying..." : "Login to Vote"}

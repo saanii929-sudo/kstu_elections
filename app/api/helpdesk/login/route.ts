@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
   try {
     // Rate limit: 5 login attempts per minute per IP
     const ip = getClientIp(request.headers);
-    const rl = checkRateLimit(`helpdesk-login:${ip}`, 5, 60 * 1000);
+    const rl = await checkRateLimit(`helpdesk-login:${ip}`, 5, 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: `Too many login attempts. Try again in ${rl.resetIn} seconds.` },

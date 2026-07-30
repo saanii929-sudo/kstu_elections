@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutGrid, Building2, X, CreditCard, DollarSign, Percent, BarChart3, CalendarDays, ShieldCheck, Vote, ScrollText, UserCircle } from "lucide-react";
+import { LayoutGrid, Building2, X, CreditCard, DollarSign, Percent, BarChart3, CalendarDays, ShieldCheck, Vote, ScrollText, UserCircle, ShieldAlert } from "lucide-react";
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
@@ -15,6 +15,7 @@ const menu = [
   { name: "Elections Monitor", href: "/superadmin/elections", icon: Vote },
   { name: "Administrators", href: "/superadmin/admins", icon: ShieldCheck },
   { name: "Audit Log", href: "/superadmin/audit-logs", icon: ScrollText },
+  { name: "Suspicious Activity", href: "/superadmin/suspicious-activity", icon: ShieldAlert },
   { name: "Site Analytics", href: "/superadmin/analytics", icon: BarChart3 },
   { name: "Profile", href: "/superadmin/profile", icon: UserCircle },
 ];

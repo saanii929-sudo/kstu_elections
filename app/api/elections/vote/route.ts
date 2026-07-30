@@ -9,7 +9,7 @@ import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 export async function POST(req: NextRequest) {
   try {
     const ip = getClientIp(req.headers);
-    const rl = checkRateLimit(`election-vote:${ip}`, 5, 10 * 60 * 1000);
+    const rl = await checkRateLimit(`election-vote:${ip}`, 5, 10 * 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: 'Too many requests. Please try again later.' },
@@ -143,6 +143,7 @@ export async function POST(req: NextRequest) {
         candidateId,
         organizationId: voter.organizationId,
         voterToken: voter.token,
+        voterIp: ip,
       });
 
       candidateUpdates.push(candidateId);

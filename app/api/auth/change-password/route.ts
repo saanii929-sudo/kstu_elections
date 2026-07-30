@@ -5,6 +5,7 @@ import OrganizationAdmin from '@/models/OrganizationAdmin';
 import EventOrganizer from '@/models/EventOrganizer';
 import Admin from '@/models/Admin';
 import { hashPassword, verifyPassword, verifyToken } from '@/lib/auth';
+import { logAudit } from '@/lib/auditLog';
 
 export async function POST(req: NextRequest) {
   try {
@@ -75,6 +76,13 @@ export async function POST(req: NextRequest) {
 
     user.password = await hashPassword(newPassword);
     await user.save();
+
+    await logAudit({
+      actor: { id: decoded.id, email: decoded.email, role: decoded.role },
+      action: 'account.password.change',
+      targetType: decoded.role === 'superadmin' || decoded.role === 'electionAdmin' ? 'Admin' : 'Account',
+      targetId: decoded.id,
+    });
 
     return NextResponse.json({
       success: true,

@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   try {
     // Rate limit: 3 reset requests per 15 minutes per IP
     const ip = getClientIp(req.headers);
-    const rl = checkRateLimit(`forgot-pw:${ip}`, 3, 15 * 60 * 1000);
+    const rl = await checkRateLimit(`forgot-pw:${ip}`, 3, 15 * 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: `Too many requests. Try again in ${rl.resetIn} seconds.` },

@@ -10,8 +10,13 @@ services:
     environment:
       # Overrides whatever MONGODB_URI is set to in .env — inside this
       # compose network the database is reachable at the service name
-      # "mongo", not localhost. Point elsewhere (e.g. MongoDB Atlas) by
-      # deleting this line and setting MONGODB_URI in .env instead.
+      # "mongo", not localhost. Point elsewhere (e.g. MongoDB Atlas), or
+      # once you've enabled Mongo auth below, by deleting this line and
+      # setting the full MONGODB_URI (with credentials + ?authSource=admin)
+      # in .env instead — deliberately NOT interpolated here from
+      # MONGO_ROOT_USERNAME/PASSWORD, so that setting those to enable auth
+      # on the mongo service below can never silently break this app's
+      # connection string on a redeploy you didn't intend to touch this on.
       MONGODB_URI: mongodb://mongo:27017/pawavotes
     depends_on:
       mongo:
@@ -20,9 +25,20 @@ services:
 
   mongo:
     image: mongo:7
+    environment:
+      # Both unset by default = mongod runs with no auth, exactly as
+      # before (the official image's entrypoint only enables --auth once
+      # BOTH of these are non-empty). See the deployment note in
+      # .env.example before setting these on a deployment that already has
+      # data in its mongo_data volume — enabling auth there needs a manual
+      # step first, or the app (and everything else) loses DB access.
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-}
     volumes:
       - mongo_data:/data/db
     healthcheck:
+      # No credentials here on purpose — `ping` is allowed pre-auth, so
+      # this works unchanged whether or not auth ends up enabled above.
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s

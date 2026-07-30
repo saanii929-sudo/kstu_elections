@@ -3,6 +3,7 @@ import connectDB from '@/lib/mongodb';
 import Organization from '@/models/Organization';
 import { hashPassword } from '@/lib/auth';
 import { withAuth } from '@/middleware/auth';
+import { logAudit } from '@/lib/auditLog';
 
 async function getOrganization(
   req: NextRequest,
@@ -73,6 +74,16 @@ async function updateOrganization(
       );
     }
 
+    await logAudit({
+      actor: (req as any).user,
+      action: 'organization.update',
+      targetType: 'Organization',
+      targetId: id,
+      // Never write the plaintext/hashed password into the audit trail —
+      // just whether it was part of this update.
+      details: { ...updateData, password: password ? '(changed)' : undefined },
+    });
+
     return NextResponse.json({
       success: true,
       message: 'Organization updated successfully',
@@ -103,6 +114,14 @@ async function deleteOrganization(
         { status: 404 }
       );
     }
+
+    await logAudit({
+      actor: (req as any).user,
+      action: 'organization.delete',
+      targetType: 'Organization',
+      targetId: id,
+      details: { name: organization.name, email: organization.email },
+    });
 
     return NextResponse.json({
       success: true,

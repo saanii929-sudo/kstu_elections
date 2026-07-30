@@ -11,7 +11,7 @@ import { trustDevice } from '@/lib/deviceTrust';
 export async function POST(req: NextRequest) {
   try {
     const ip = getClientIp(req.headers);
-    const rl = checkRateLimit(`admin-otp-send:${ip}`, 5, 5 * 60 * 1000);
+    const rl = await checkRateLimit(`admin-otp-send:${ip}`, 5, 5 * 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: 'Too many requests. Please wait before trying again.' },
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const ip = getClientIp(req.headers);
-    const rl = checkRateLimit(`admin-otp-verify:${ip}`, 10, 5 * 60 * 1000);
+    const rl = await checkRateLimit(`admin-otp-verify:${ip}`, 10, 5 * 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: 'Too many verification attempts. Please wait before trying again.' },

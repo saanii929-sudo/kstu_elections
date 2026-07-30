@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   try {
     // Rate limit: 5 login attempts per minute per IP
     const ip = getClientIp(req.headers);
-    const rl = checkRateLimit(`login:${ip}`, 5, 60 * 1000);
+    const rl = await checkRateLimit(`login:${ip}`, 5, 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: `Too many login attempts. Try again in ${rl.resetIn} seconds.` },
@@ -64,13 +64,47 @@ export async function POST(req: NextRequest) {
         { status: 401 }
       );
     }
+
+    // Admin-model accounts (superadmin/admin/helpdesk/electionAdmin) get a
+    // brute-force lockout on top of the per-IP rate limit above — this is
+    // the only account type here privileged enough to warrant it, and the
+    // per-IP limit alone doesn't stop an attacker rotating IPs against one
+    // specific admin's password.
+    const isAdminAccount = userType === 'admin' || userType === 'superadmin';
+    const ADMIN_LOCKOUT_THRESHOLD = 5;
+    const ADMIN_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
+    const adminUser = user as any;
+
+    if (isAdminAccount && adminUser.lockUntil && adminUser.lockUntil.getTime() > Date.now()) {
+      const minutesLeft = Math.ceil((adminUser.lockUntil.getTime() - Date.now()) / 60000);
+      return NextResponse.json(
+        { error: `Account temporarily locked due to too many failed attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'}.` },
+        { status: 429 }
+      );
+    }
+
     const isValidPassword = await verifyPassword(password, user.password);
 
     if (!isValidPassword) {
+      if (isAdminAccount) {
+        adminUser.failedLoginAttempts = (adminUser.failedLoginAttempts || 0) + 1;
+        if (adminUser.failedLoginAttempts >= ADMIN_LOCKOUT_THRESHOLD) {
+          adminUser.lockUntil = new Date(Date.now() + ADMIN_LOCKOUT_DURATION_MS);
+          adminUser.failedLoginAttempts = 0;
+        }
+        await adminUser.save();
+      }
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }
       );
+    }
+
+    if (isAdminAccount && (adminUser.failedLoginAttempts || adminUser.lockUntil)) {
+      adminUser.failedLoginAttempts = 0;
+      adminUser.lockUntil = undefined;
+      await adminUser.save();
     }
 
     // For org-admins, derive all context from the organizations array

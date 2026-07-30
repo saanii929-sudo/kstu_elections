@@ -11,7 +11,7 @@ import { checkVoterEligibility } from '@/lib/voterEligibility';
 export async function POST(req: NextRequest) {
   try {
     const ip = getClientIp(req.headers);
-    const rl = checkRateLimit(`verify-link:${ip}`, 20, 15 * 60 * 1000);
+    const rl = await checkRateLimit(`verify-link:${ip}`, 20, 15 * 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: 'Too many attempts. Please try again later.' },

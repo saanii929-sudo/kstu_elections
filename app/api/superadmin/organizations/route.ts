@@ -4,6 +4,7 @@ import Organization from "@/models/Organization";
 import { hashPassword } from "@/lib/auth";
 import { withAuth } from "@/middleware/auth";
 import { sanitizeSearch } from "@/lib/security";
+import { logAudit } from "@/lib/auditLog";
 
 async function getOrganizations(req: NextRequest) {
   try {
@@ -195,6 +196,14 @@ async function createOrganization(req: NextRequest) {
 
     const orgData: any = organization.toObject();
     delete orgData.password;
+
+    await logAudit({
+      actor: (req as any).user,
+      action: "organization.create",
+      targetType: "Organization",
+      targetId: String(organization._id),
+      details: { name, email, eventType },
+    });
 
     // Determine overall success message
     let message = "Organization created successfully. ";

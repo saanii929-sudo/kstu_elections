@@ -14,7 +14,7 @@ function generateOTP(): string {
 export async function POST(req: NextRequest) {
   try {
     const ip = getClientIp(req.headers);
-    const rl = checkRateLimit(`otp-send:${ip}`, 5, 5 * 60 * 1000);
+    const rl = await checkRateLimit(`otp-send:${ip}`, 5, 5 * 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: 'Too many OTP requests. Please wait before trying again.' },
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const ip = getClientIp(req.headers);
-    const rl = checkRateLimit(`otp-verify:${ip}`, 10, 5 * 60 * 1000);
+    const rl = await checkRateLimit(`otp-verify:${ip}`, 10, 5 * 60 * 1000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: 'Too many verification attempts.' },

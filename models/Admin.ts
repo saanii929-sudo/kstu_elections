@@ -14,6 +14,11 @@ export interface IAdmin extends Document {
   // Browsers that have completed OTP verification recently — login from one
   // of these skips the OTP step until its own expiry (see lib/deviceTrust.ts).
   trustedDevices: { token: string; expiresAt: Date }[];
+  // Brute-force lockout — incremented on each bad password, reset on a
+  // successful password verify. lockUntil being in the future blocks
+  // further password attempts regardless of failedLoginAttempts.
+  failedLoginAttempts: number;
+  lockUntil?: Date;
   resetPasswordToken?: string;
   resetPasswordExpiry?: Date;
   createdAt: Date;
@@ -62,6 +67,13 @@ const AdminSchema: Schema = new Schema(
         expiresAt: { type: Date, required: true },
       },
     ],
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+    },
+    lockUntil: {
+      type: Date,
+    },
     resetPasswordToken: {
       type: String,
     },

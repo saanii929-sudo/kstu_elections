@@ -3,6 +3,8 @@ import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import ChatbotWidget from "@/components/chatbot-widget";
 import VisitorTracker from "@/components/VisitorTracker";
+import DisableInspect from "@/components/DisableInspect";
+import DevToolsGuard from "@/components/DevToolsGuard";
 
 // Using system fonts as fallback to avoid Google Fonts connection issues during build
 const geistSans = {
@@ -42,6 +44,8 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <VisitorTracker />
+        <DisableInspect />
+        <DevToolsGuard />
         {children}
       </body>
     </html>

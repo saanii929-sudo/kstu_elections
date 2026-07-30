@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Candidate from '@/models/Candidate';
+import Election from '@/models/Election';
 import { verifyToken } from '@/lib/auth';
 import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 
 // Deliberately public/unauthenticated — this is the voter-facing ballot's
 // own candidate list (app/election/vote/page.tsx calls this with no auth
 // header) as well as the admin dashboard's read. Do not add an auth
-// requirement here.
+// requirement here. voteCount is filtered out below for anyone who isn't
+// entitled to see it yet, though — see the comment further down.
 export async function GET(req: NextRequest) {
   try {
     await connectDB();
@@ -32,9 +34,41 @@ export async function GET(req: NextRequest) {
       .populate('categoryId', 'name')
       .sort({ ballotNumber: 1, createdAt: 1 });
 
+    // voteCount is only safe to hand back once the election has ended or the
+    // organizer explicitly opted into live results (settings.showLiveResults)
+    // — otherwise this being a public/unauthenticated endpoint would let
+    // anyone with an electionId watch live vote tallies before results are
+    // meant to be revealed. The election's own manager (organization /
+    // electionAdmin) or superadmin can still always see it, via an
+    // Authorization header — the dashboard pages that need live counts while
+    // an election is running send one for exactly this reason.
+    const election = await Election.findById(electionId)
+      .select('status organizationId settings.showLiveResults')
+      .lean() as any;
+
+    let includeVoteCount = !!election && (election.status === 'ended' || !!election.settings?.showLiveResults);
+
+    if (!includeVoteCount && election) {
+      const token = req.headers.get('authorization')?.replace('Bearer ', '');
+      const decoded = token ? verifyToken(token) : null;
+      if (decoded?.role === 'superadmin') {
+        includeVoteCount = true;
+      } else if (isElectionManager(decoded) && (await getAccessibleElection(decoded, electionId))) {
+        includeVoteCount = true;
+      }
+    }
+
+    const data = includeVoteCount
+      ? candidates
+      : candidates.map((c) => {
+          const obj: any = c.toObject();
+          delete obj.voteCount;
+          return obj;
+        });
+
     return NextResponse.json({
       success: true,
-      data: candidates,
+      data,
     });
   } catch (error: any) {
     console.error('Get candidates error:', error);

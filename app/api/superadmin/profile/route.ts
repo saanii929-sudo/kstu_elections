@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Admin from '@/models/Admin';
 import { verifyToken } from '@/lib/auth';
+import { logAudit } from '@/lib/auditLog';
 
 function isAdminRole(role: string | undefined): boolean {
   return role === 'superadmin' || role === 'electionAdmin';
@@ -65,6 +66,14 @@ export async function PUT(req: NextRequest) {
     if (!admin) {
       return NextResponse.json({ error: 'Administrator not found' }, { status: 404 });
     }
+
+    await logAudit({
+      actor: { id: decoded.id, email: admin.email, role: decoded.role },
+      action: 'admin.profile.update',
+      targetType: 'Admin',
+      targetId: decoded.id,
+      details: updateData,
+    });
 
     return NextResponse.json({
       success: true,

@@ -95,7 +95,10 @@ export default function CandidatesPage() {
 
     setLoading(true);
     try {
-      const response = await fetch(`/api/elections/candidates?electionId=${selectedElection}`);
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/elections/candidates?electionId=${selectedElection}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       if (response.ok) {
         const data = await response.json();

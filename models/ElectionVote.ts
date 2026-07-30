@@ -7,6 +7,10 @@ export interface IElectionVote extends Document {
   candidateId: mongoose.Types.ObjectId;
   organizationId: mongoose.Types.ObjectId;
   voterToken: string;
+  // Best-effort forensic trail — the IP the vote was cast from, for
+  // superadmin review (see /superadmin/suspicious-activity). Never used to
+  // block a vote; requests can share an IP legitimately (campus WiFi).
+  voterIp?: string;
   createdAt: Date;
 }
 
@@ -42,6 +46,9 @@ const ElectionVoteSchema: Schema = new Schema(
     voterToken: {
       type: String,
       required: true,
+    },
+    voterIp: {
+      type: String,
     },
   },
   {

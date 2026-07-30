@@ -191,7 +191,10 @@ export default function ResultsPage() {
     if (!selectedElection) return;
     if (initial) setLoading(true); else setRefreshing(true);
     try {
-      const res = await fetch(`/api/elections/candidates?electionId=${selectedElection}`);
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/elections/candidates?electionId=${selectedElection}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (res.ok) {
         const data = await res.json();
         setCandidates(data.data || []);
