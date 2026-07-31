@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Candidate from '@/models/Candidate';
 import Election from '@/models/Election';
+// Registers the ElectionCategory schema for .populate('categoryId') below —
+// Candidate only references it by string ref, so without this import
+// Mongoose throws MissingSchemaError unless some other route happened to
+// load the model first in the same server process.
+import '@/models/ElectionCategory';
 import { verifyToken } from '@/lib/auth';
 import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 

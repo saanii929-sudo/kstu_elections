@@ -1551,7 +1551,7 @@ export default function VotersPage() {
                     )}
                   </div>
 
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start justify-between gap-4">
+                  {/* <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start justify-between gap-4">
                     <div>
                       <p className="text-sm font-semibold text-red-800">
                         Uploaded the wrong file?
@@ -1564,11 +1564,11 @@ export default function VotersPage() {
                     <button
                       onClick={undoBulkUpload}
                       disabled={undoingBatch || !uploadResults.batchId}
-                      className="shrink-0 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="shrink-0 px-4 py-2 text-yellow-600 text-sm font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {undoingBatch ? "Undoing…" : "Undo This Upload"}
                     </button>
-                  </div>
+                  </div> */}
 
                   <div className="flex gap-3 justify-end pt-2">
                     <button
@@ -1657,12 +1657,12 @@ export default function VotersPage() {
                         </div>
                       )}
 
-                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start justify-between gap-4">
+                      <div className="p-4  border border-red-200 rounded-lg flex items-start justify-between gap-4">
                         <div>
-                          <p className="text-sm font-semibold text-red-800">
+                          <p className="text-sm font-semibold text-yellow-800">
                             Uploaded the wrong file?
                           </p>
-                          <p className="text-xs text-red-600 mt-0.5">
+                          <p className="text-xs text-yellow-800 mt-0.5">
                             Undo removes every voter just added by this
                             upload before you go any further.
                           </p>
@@ -1670,7 +1670,7 @@ export default function VotersPage() {
                         <button
                           onClick={undoBulkUpload}
                           disabled={undoingBatch || !uploadResults.batchId}
-                          className="shrink-0 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="shrink-0 px-4 py-2  text-yellow-800 text-sm font-medium rounded-lg cursor-pointer border-1 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {undoingBatch ? "Undoing…" : "Undo This Upload"}
                         </button>
