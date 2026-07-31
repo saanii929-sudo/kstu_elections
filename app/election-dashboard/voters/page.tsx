@@ -14,6 +14,8 @@ import {
   Mail,
   CalendarClock,
   Check,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import AlertModal from "@/components/AlertModal";
@@ -41,6 +43,8 @@ interface Election {
   startDate: string;
   endDate: string;
 }
+
+const VOTERS_PAGE_SIZE = 20;
 
 function parseCsvLine(line: string): string[] {
   const fields: string[] = [];
@@ -178,6 +182,7 @@ export default function VotersPage() {
   const [rescheduleSendAt, setRescheduleSendAt] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
   const [deletingAllVoters, setDeletingAllVoters] = useState(false);
+  const [votersPage, setVotersPage] = useState(1);
 
   // Modal states
   const [alertModal, setAlertModal] = useState<{
@@ -219,6 +224,7 @@ export default function VotersPage() {
       fetchVoters();
       const election = elections.find((e) => e._id === selectedElection);
       setSelectedElectionData(election || null);
+      setVotersPage(1);
     }
   }, [selectedElection, elections]);
 
@@ -648,15 +654,17 @@ export default function VotersPage() {
     });
   };
 
-  // Wipes every voter registered for the currently selected election.
-  // Voters who have already voted are kept (their votes stay intact).
+  // Wipes every voter registered for the currently selected election —
+  // including anyone who has already voted or whose status is expired.
+  // Their votes are deleted too, and this election's candidate vote counts
+  // are reset to zero to match.
   const handleDeleteAllVoters = () => {
     if (!selectedElection || voters.length === 0) return;
 
     setConfirmModal({
       isOpen: true,
       title: "Delete All Voters",
-      message: `This permanently removes all ${voters.length} voter(s) registered for this election. Voters who have already voted will be kept to protect recorded results. This cannot be undone.`,
+      message: `This permanently removes all ${voters.length} voter(s) registered for this election — including anyone who has already voted. Their votes will be deleted and this election's candidate vote counts will be reset to zero. This cannot be undone.`,
       type: "danger",
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
@@ -714,6 +722,18 @@ export default function VotersPage() {
       voter.name.toLowerCase().includes(search.toLowerCase()) ||
       voter.email?.toLowerCase().includes(search.toLowerCase()) ||
       voter.voterId?.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const votersTotalPages = Math.max(
+    1,
+    Math.ceil(filteredVoters.length / VOTERS_PAGE_SIZE),
+  );
+  // Clamped rather than stored, so a list that shrinks (search narrows it,
+  // or voters get deleted) never strands the view on a now-empty page.
+  const currentVotersPage = Math.min(votersPage, votersTotalPages);
+  const pagedVoters = filteredVoters.slice(
+    (currentVotersPage - 1) * VOTERS_PAGE_SIZE,
+    currentVotersPage * VOTERS_PAGE_SIZE,
   );
 
   const pendingVotersCount = voters.filter((v) => !v.credentialsSent).length;
@@ -894,7 +914,10 @@ export default function VotersPage() {
                 type="text"
                 placeholder="Search voters..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setVotersPage(1);
+                }}
                 className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
               />
             </div>
@@ -918,7 +941,7 @@ export default function VotersPage() {
                 </div>
               </div>
             ) : (
-              filteredVoters.map((voter) => (
+              pagedVoters.map((voter) => (
                 <div
                   key={voter._id}
                   className="bg-white rounded-xl shadow-sm border border-gray-100 p-4"
@@ -1111,7 +1134,7 @@ export default function VotersPage() {
                       </td>
                     </tr>
                   ) : (
-                    filteredVoters.map((voter) => (
+                    pagedVoters.map((voter) => (
                       <tr
                         key={voter._id}
                         className="hover:bg-green-50 transition-colors"
@@ -1246,6 +1269,39 @@ export default function VotersPage() {
               </table>
             </div>
           </div>
+
+          {/* Pagination */}
+          {filteredVoters.length > 0 && votersTotalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between gap-4">
+              <p className="text-sm text-gray-500">
+                Page {currentVotersPage} of {votersTotalPages} ·{" "}
+                {filteredVoters.length} voter
+                {filteredVoters.length !== 1 ? "s" : ""}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() =>
+                    setVotersPage(Math.max(1, currentVotersPage - 1))
+                  }
+                  disabled={currentVotersPage <= 1}
+                  className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                >
+                  <ChevronLeft size={16} />
+                  Prev
+                </button>
+                <button
+                  onClick={() =>
+                    setVotersPage(Math.min(votersTotalPages, currentVotersPage + 1))
+                  }
+                  disabled={currentVotersPage >= votersTotalPages}
+                  className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                >
+                  Next
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 

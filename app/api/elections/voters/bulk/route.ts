@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import connectDB from '@/lib/mongodb';
 import Voter from '@/models/Voter';
 import ElectionVote from '@/models/ElectionVote';
+import Candidate from '@/models/Candidate';
 import { verifyToken } from '@/lib/auth';
 import { hashPassword } from '@/lib/auth';
 import { generateVoterLinkHash } from '@/lib/voterLink';
@@ -392,9 +393,11 @@ export async function POST(req: NextRequest) {
 }
 
 // Bulk voter removal: either "undo a batch" (batchId given — removes just
-// that upload) or "delete all" (batchId omitted — removes every voter in
-// the election). Either way, voters who have already voted are skipped and
-// reported back rather than removed, to protect recorded results.
+// that upload, skipping anyone who's already voted to protect recorded
+// results) or "delete all" (batchId omitted — wipes every voter in the
+// election, including ones who already voted or whose status is expired;
+// their votes are deleted and that election's candidate tallies are reset
+// to zero, since no voters remain to have cast them).
 export async function DELETE(req: NextRequest) {
   try {
     await connectDB();
@@ -433,13 +436,14 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    const removable = targetVoters.filter((v) => !v.hasVoted);
-    const blocked = targetVoters.filter((v) => v.hasVoted);
+    const removable = batchId ? targetVoters.filter((v) => !v.hasVoted) : targetVoters;
+    const blocked = batchId ? targetVoters.filter((v) => v.hasVoted) : [];
     const removableIds = removable.map((v) => v._id);
 
     await Promise.all([
       Voter.deleteMany({ _id: { $in: removableIds } }),
       ElectionVote.deleteMany({ voterId: { $in: removableIds } }),
+      ...(!batchId ? [Candidate.updateMany({ electionId }, { voteCount: 0, noVoteCount: 0 })] : []),
     ]);
 
     await logAudit({
@@ -449,7 +453,7 @@ export async function DELETE(req: NextRequest) {
       targetId: String(electionId),
       details: batchId
         ? { batchId, removed: removable.length, blocked: blocked.length }
-        : { removed: removable.length, blocked: blocked.length },
+        : { removed: removable.length },
     });
 
     return NextResponse.json({
@@ -457,7 +461,7 @@ export async function DELETE(req: NextRequest) {
       message:
         blocked.length > 0
           ? `Removed ${removable.length} voter(s). ${blocked.length} could not be removed because they have already voted.`
-          : `Removed ${removable.length} voter(s)${batchId ? ' from this upload' : ''}.`,
+          : `Removed ${removable.length} voter(s)${batchId ? ' from this upload' : ' and reset all candidate vote counts for this election'}.`,
       data: {
         removed: removable.length,
         blocked: blocked.length,
