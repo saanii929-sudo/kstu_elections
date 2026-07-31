@@ -100,6 +100,12 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const electionId = searchParams.get('electionId');
+    const search = searchParams.get('search')?.trim();
+    // Optional — omitted means "return everything" (unpaginated), for any
+    // caller that doesn't need paging.
+    const limitParam = searchParams.get('limit');
+    const limit = limitParam ? Math.max(1, parseInt(limitParam, 10)) : undefined;
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
 
     if (!electionId) {
       return NextResponse.json(
@@ -117,11 +123,32 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const voters = await Voter.find({ electionId }).sort({ createdAt: -1 });
+    const filter: Record<string, unknown> = { electionId };
+    if (search) {
+      const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [{ name: regex }, { email: regex }, { voterId: regex }];
+    }
+
+    // electionTotal/pendingCredentialsCount are election-wide (ignore the
+    // search filter) — actions like "Delete All" and "Reschedule" operate on
+    // the whole roster, not just whatever's visible on the current search/page.
+    const [total, electionTotal, pendingCredentialsCount] = await Promise.all([
+      Voter.countDocuments(filter),
+      search ? Voter.countDocuments({ electionId }) : Promise.resolve(undefined),
+      Voter.countDocuments({ electionId, credentialsSent: false }),
+    ]);
+    const totalPages = limit ? Math.max(1, Math.ceil(total / limit)) : 1;
+
+    let query = Voter.find(filter).sort({ createdAt: -1 });
+    if (limit) query = query.skip((page - 1) * limit).limit(limit);
+    const voters = await query;
 
     return NextResponse.json({
       success: true,
       data: voters,
+      pagination: { page: limit ? page : 1, limit: limit ?? total, total, totalPages },
+      electionTotal: electionTotal ?? total,
+      pendingCredentialsCount,
     });
   } catch (error: any) {
     console.error('Get voters error');

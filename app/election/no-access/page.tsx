@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ShieldAlert } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function NoAccessPage() {
@@ -24,16 +24,14 @@ export default function NoAccessPage() {
           className="w-full max-w-md rounded-2xl bg-white/95 p-8 shadow-2xl backdrop-blur text-center"
         >
           <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-5">
-            <ShieldAlert className="text-red-500" size={30} />
+            <CheckCircle2 className="text-green-600" size={30} />
           </div>
-          <h1 className="text-xl font-bold text-[#1C2338] mb-2">No Permission Granted</h1>
+          <h1 className="text-xl font-bold text-[#1C2338] mb-2">You've already voted</h1>
           <p className="text-sm text-gray-500 leading-relaxed">
-            This page can only be reached through the secure voting link sent to you by SMS or
-            email. Links are unique to each voter and cannot be guessed or shared.
+            You have already voted for this election.
           </p>
           <p className="text-sm text-gray-500 leading-relaxed mt-3">
-            If you haven&apos;t received your link, or it has expired, please contact your
-            election administrator for help.
+            The link you are trying to access is invalid or has already been used.
           </p>
         </motion.div>
       </div>

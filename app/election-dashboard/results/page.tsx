@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { getElectionStatus } from "@/lib/electionStatus";
+import { formatElectionDateTime } from "@/lib/formatDate";
 
 // Dynamic color palette for candidate differentiation
 const CANDIDATE_COLORS = [
@@ -41,11 +42,6 @@ interface Candidate {
   // explicit rejections on the YES/NO referendum ballot.
   noVoteCount?: number;
   categoryId: { _id: string; name: string };
-}
-
-interface Voter {
-  _id: string;
-  hasVoted: boolean;
 }
 
 interface Election {
@@ -196,9 +192,13 @@ function getTieStatus(candidates: { voteCount: number }[]) {
 
 export default function ResultsPage() {
   const [elections, setElections] = useState<Election[]>([]);
+  const [electionsLoading, setElectionsLoading] = useState(true);
   const [selectedElection, setSelectedElection] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [voters, setVoters] = useState<Voter[]>([]);
+  // Counts only (not full voter documents) — the auto-refresh below polls
+  // this every 5s, and there's no need to transfer every voter's
+  // name/email/phone/credentials just to derive two numbers.
+  const [voterCounts, setVoterCounts] = useState({ totalVoters: 0, votedCount: 0 });
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
@@ -256,9 +256,9 @@ export default function ResultsPage() {
       if (res.ok) {
         const data = await res.json();
         setElections(data.data || []);
-        if (data.data.length > 0) setSelectedElection(data.data[0]._id);
       }
     } catch {}
+    setElectionsLoading(false);
   };
 
   const fetchResults = async (initial = false) => {
@@ -291,14 +291,17 @@ export default function ResultsPage() {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `/api/elections/voters?electionId=${selectedElection}`,
+        `/api/elections/voters/count?electionId=${selectedElection}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
       if (res.ok) {
         const data = await res.json();
-        setVoters(data.data || []);
+        setVoterCounts({
+          totalVoters: data.data?.totalVoters ?? 0,
+          votedCount: data.data?.votedCount ?? 0,
+        });
       }
     } catch {}
   };
@@ -317,8 +320,7 @@ export default function ResultsPage() {
     groupedCandidates[pos].sort((a, b) => b.voteCount - a.voteCount);
   });
 
-  const totalVoters = voters.length;
-  const votedCount = voters.filter((v) => v.hasVoted).length;
+  const { totalVoters, votedCount } = voterCounts;
   const turnoutRate =
     totalVoters > 0 ? Math.round((votedCount / totalVoters) * 100) : 0;
 
@@ -473,8 +475,12 @@ export default function ResultsPage() {
           <select
             value={selectedElection}
             onChange={(e) => setSelectedElection(e.target.value)}
-            className="w-full md:w-80 px-4 py-2.5 border border-gray-200 rounded-lg text-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37] bg-white"
+            disabled={electionsLoading}
+            className="w-full md:w-80 px-4 py-2.5 border border-gray-200 rounded-lg text-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37] bg-white disabled:bg-gray-50 disabled:text-gray-400"
           >
+            <option value="">
+              {electionsLoading ? "Loading elections…" : "Select an election…"}
+            </option>
             {elections.map((e) => (
               <option key={e._id} value={e._id}>
                 {e.title}
@@ -512,6 +518,22 @@ export default function ResultsPage() {
         )}
       </div>
 
+      {!electionsLoading && !selectedElection && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-16 text-center">
+          <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <BarChart3 className="text-blue-600" size={32} />
+          </div>
+          <h3 className="font-bold text-gray-900 mb-1">
+            {elections.length === 0 ? "No elections yet" : "Select an election"}
+          </h3>
+          <p className="text-lg text-gray-500">
+            {elections.length === 0
+              ? "Create an election to see its results here."
+              : "Choose an election above to view its live results."}
+          </p>
+        </div>
+      )}
+
       {selectedElection && currentElection && (
         <>
           {/* Countdown Banner */}
@@ -523,8 +545,8 @@ export default function ResultsPage() {
                 </p>
                 <p className="text-sm text-gray-400 mt-0.5">
                   {electionActive
-                    ? `Ends ${new Date(currentElection.endDate).toLocaleString()}`
-                    : `Starts ${new Date(currentElection.startDate).toLocaleString()}`}
+                    ? `Ends ${formatElectionDateTime(currentElection.endDate)}`
+                    : `Starts ${formatElectionDateTime(currentElection.startDate)}`}
                 </p>
               </div>
               <div className="flex items-start gap-3 sm:gap-4">
@@ -564,7 +586,7 @@ export default function ResultsPage() {
                 </p>
                 <p className="text-sm text-gray-500 mt-0.5">
                   Final results · ended{" "}
-                  {new Date(currentElection.endDate).toLocaleString()}
+                  {formatElectionDateTime(currentElection.endDate)}
                 </p>
               </div>
             </div>

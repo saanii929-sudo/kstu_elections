@@ -135,6 +135,7 @@ function StepIndicator({
 
 export default function VotersPage() {
   const [elections, setElections] = useState<Election[]>([]);
+  const [electionsLoading, setElectionsLoading] = useState(true);
   const [selectedElection, setSelectedElection] = useState("");
   const [selectedElectionData, setSelectedElectionData] =
     useState<Election | null>(null);
@@ -183,6 +184,16 @@ export default function VotersPage() {
   const [rescheduling, setRescheduling] = useState(false);
   const [deletingAllVoters, setDeletingAllVoters] = useState(false);
   const [votersPage, setVotersPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [votersPagination, setVotersPagination] = useState({
+    page: 1,
+    total: 0,
+    totalPages: 1,
+  });
+  // Election-wide (ignore search/page) — "Delete All" and "Reschedule"
+  // operate on the whole roster, not just what's currently visible.
+  const [electionTotalVoters, setElectionTotalVoters] = useState(0);
+  const [pendingCredentialsCount, setPendingCredentialsCount] = useState(0);
 
   // Modal states
   const [alertModal, setAlertModal] = useState<{
@@ -219,14 +230,20 @@ export default function VotersPage() {
     fetchElections();
   }, []);
 
+  // Debounced so typing a search term doesn't fire a request per keystroke.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(id);
+  }, [search]);
+
   useEffect(() => {
     if (selectedElection) {
       fetchVoters();
       const election = elections.find((e) => e._id === selectedElection);
       setSelectedElectionData(election || null);
-      setVotersPage(1);
     }
-  }, [selectedElection, elections]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedElection, elections, votersPage, debouncedSearch]);
 
   const fetchElections = async () => {
     try {
@@ -235,12 +252,11 @@ export default function VotersPage() {
       if (response.ok) {
         const data = await response.json();
         setElections(data.data || []);
-        if (data.data.length > 0) {
-          setSelectedElection(data.data[0]._id);
-        }
       }
     } catch (error) {
       console.error("Failed to fetch elections:", error);
+    } finally {
+      setElectionsLoading(false);
     }
   };
 
@@ -249,13 +265,20 @@ export default function VotersPage() {
 
     setLoading(true);
     try {
-      const response = await authFetch(
-        `/api/elections/voters?electionId=${selectedElection}`,
-      );
+      const params = new URLSearchParams({
+        electionId: selectedElection,
+        page: String(votersPage),
+        limit: String(VOTERS_PAGE_SIZE),
+      });
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      const response = await authFetch(`/api/elections/voters?${params.toString()}`);
 
       if (response.ok) {
         const data = await response.json();
         setVoters(data.data || []);
+        if (data.pagination) setVotersPagination(data.pagination);
+        if (typeof data.electionTotal === "number") setElectionTotalVoters(data.electionTotal);
+        if (typeof data.pendingCredentialsCount === "number") setPendingCredentialsCount(data.pendingCredentialsCount);
       }
     } catch (error) {
       console.error("Failed to fetch voters:", error);
@@ -659,12 +682,12 @@ export default function VotersPage() {
   // Their votes are deleted too, and this election's candidate vote counts
   // are reset to zero to match.
   const handleDeleteAllVoters = () => {
-    if (!selectedElection || voters.length === 0) return;
+    if (!selectedElection || electionTotalVoters === 0) return;
 
     setConfirmModal({
       isOpen: true,
       title: "Delete All Voters",
-      message: `This permanently removes all ${voters.length} voter(s) registered for this election — including anyone who has already voted. Their votes will be deleted and this election's candidate vote counts will be reset to zero. This cannot be undone.`,
+      message: `This permanently removes all ${electionTotalVoters} voter(s) registered for this election — including anyone who has already voted. Their votes will be deleted and this election's candidate vote counts will be reset to zero. This cannot be undone.`,
       type: "danger",
       onConfirm: async () => {
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
@@ -717,26 +740,11 @@ export default function VotersPage() {
     });
   };
 
-  const filteredVoters = voters.filter(
-    (voter) =>
-      voter.name.toLowerCase().includes(search.toLowerCase()) ||
-      voter.email?.toLowerCase().includes(search.toLowerCase()) ||
-      voter.voterId?.toLowerCase().includes(search.toLowerCase()),
-  );
-
-  const votersTotalPages = Math.max(
-    1,
-    Math.ceil(filteredVoters.length / VOTERS_PAGE_SIZE),
-  );
-  // Clamped rather than stored, so a list that shrinks (search narrows it,
-  // or voters get deleted) never strands the view on a now-empty page.
-  const currentVotersPage = Math.min(votersPage, votersTotalPages);
-  const pagedVoters = filteredVoters.slice(
-    (currentVotersPage - 1) * VOTERS_PAGE_SIZE,
-    currentVotersPage * VOTERS_PAGE_SIZE,
-  );
-
-  const pendingVotersCount = voters.filter((v) => !v.credentialsSent).length;
+  // Server already applied search + pagination — `voters` is exactly what
+  // this page should render, no client-side re-filtering/slicing needed.
+  const pagedVoters = voters;
+  const votersTotalPages = votersPagination.totalPages;
+  const currentVotersPage = votersPagination.page;
 
   const confirmReschedule = async () => {
     if (!rescheduleSendAt) return;
@@ -785,9 +793,17 @@ export default function VotersPage() {
         <div className="w-full md:w-1/2">
           <select
             value={selectedElection}
-            onChange={(e) => setSelectedElection(e.target.value)}
-            className="w-full md:w-96 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+            onChange={(e) => {
+              setSelectedElection(e.target.value);
+              setVotersPage(1);
+              setSearch("");
+            }}
+            disabled={electionsLoading}
+            className="w-full md:w-96 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37] disabled:bg-gray-50 disabled:text-gray-400"
           >
+            <option value="">
+              {electionsLoading ? "Loading elections…" : "Select an election…"}
+            </option>
             {elections.map((election) => (
               <option key={election._id} value={election._id}>
                 {election.title}
@@ -829,7 +845,7 @@ export default function VotersPage() {
                     );
                     return;
                   }
-                  if (pendingVotersCount === 0) {
+                  if (pendingCredentialsCount === 0) {
                     toast.error(
                       "No pending voters to reschedule — everyone already has credentials sent.",
                     );
@@ -838,21 +854,21 @@ export default function VotersPage() {
                   setRescheduleSendAt("");
                   setShowRescheduleModal(true);
                 }}
-                disabled={isElectionEnded() || pendingVotersCount === 0}
+                disabled={isElectionEnded() || pendingCredentialsCount === 0}
                 title={
-                  pendingVotersCount === 0
+                  pendingCredentialsCount === 0
                     ? "No pending voters to reschedule"
-                    : `Reschedule credential delivery for ${pendingVotersCount} pending voter(s)`
+                    : `Reschedule credential delivery for ${pendingCredentialsCount} pending voter(s)`
                 }
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
-                  isElectionEnded() || pendingVotersCount === 0
+                  isElectionEnded() || pendingCredentialsCount === 0
                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                     : "bg-white text-[#1C2338] border border-[#1C2338] hover:bg-gray-50"
                 }`}
               >
                 <CalendarClock size={18} />
                 Reschedule
-                {pendingVotersCount > 0 ? ` (${pendingVotersCount})` : ""}
+                {pendingCredentialsCount > 0 ? ` (${pendingCredentialsCount})` : ""}
               </button>
               <button
                 onClick={() => {
@@ -881,14 +897,14 @@ export default function VotersPage() {
               </button>
               <button
                 onClick={handleDeleteAllVoters}
-                disabled={deletingAllVoters || voters.length === 0}
+                disabled={deletingAllVoters || electionTotalVoters === 0}
                 title={
-                  voters.length === 0
+                  electionTotalVoters === 0
                     ? "No voters to delete"
-                    : `Delete all ${voters.length} voter(s) for this election`
+                    : `Delete all ${electionTotalVoters} voter(s) for this election`
                 }
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
-                  deletingAllVoters || voters.length === 0
+                  deletingAllVoters || electionTotalVoters === 0
                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                     : "bg-red-600 text-white hover:bg-red-700"
                 }`}
@@ -900,6 +916,19 @@ export default function VotersPage() {
           </div>
         )}
       </div>
+
+      {!electionsLoading && !selectedElection && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
+          <div className="flex flex-col items-center gap-2">
+            <Users className="text-gray-400" size={48} />
+            <span className="text-gray-500">
+              {elections.length === 0
+                ? "No elections yet — create one to start adding voters."
+                : "Select an election above to view and manage its voters."}
+            </span>
+          </div>
+        </div>
+      )}
 
       {selectedElection && (
         <>
@@ -933,7 +962,7 @@ export default function VotersPage() {
                   <span className="text-gray-500">Loading voters...</span>
                 </div>
               </div>
-            ) : filteredVoters.length === 0 ? (
+            ) : voters.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
                 <div className="flex flex-col items-center gap-2">
                   <Users className="text-gray-400" size={48} />
@@ -1121,7 +1150,7 @@ export default function VotersPage() {
                         </div>
                       </td>
                     </tr>
-                  ) : filteredVoters.length === 0 ? (
+                  ) : voters.length === 0 ? (
                     <tr>
                       <td
                         colSpan={8}
@@ -1271,12 +1300,12 @@ export default function VotersPage() {
           </div>
 
           {/* Pagination */}
-          {filteredVoters.length > 0 && votersTotalPages > 1 && (
+          {votersPagination.total > 0 && votersTotalPages > 1 && (
             <div className="mt-4 flex items-center justify-between gap-4">
               <p className="text-sm text-gray-500">
                 Page {currentVotersPage} of {votersTotalPages} ·{" "}
-                {filteredVoters.length} voter
-                {filteredVoters.length !== 1 ? "s" : ""}
+                {votersPagination.total} voter
+                {votersPagination.total !== 1 ? "s" : ""}
               </p>
               <div className="flex items-center gap-2">
                 <button
@@ -2016,9 +2045,9 @@ export default function VotersPage() {
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-600">
-                {pendingVotersCount} voter{pendingVotersCount !== 1 ? "s" : ""}{" "}
+                {pendingCredentialsCount} voter{pendingCredentialsCount !== 1 ? "s" : ""}{" "}
                 in <strong>{selectedElectionData?.title}</strong>{" "}
-                {pendingVotersCount !== 1 ? "haven't" : "hasn't"} had
+                {pendingCredentialsCount !== 1 ? "haven't" : "hasn't"} had
                 credentials sent yet. Pick a new date/time to send them at —
                 this replaces whatever time was set before.
               </p>
