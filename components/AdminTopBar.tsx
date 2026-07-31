@@ -5,12 +5,14 @@ import { useUI } from '@/context/ui-context';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import toast from 'react-hot-toast';
+import ConfirmModal from '@/components/ConfirmModal';
 
 export default function AdminTopBar() {
   const { setSidebarOpen } = useUI();
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,6 +37,12 @@ export default function AdminTopBar() {
   }, []);
 
   const handleLogout = () => {
+    setShowDropdown(false);
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = () => {
+    setShowLogoutConfirm(false);
     toast.success('Logged out successfully');
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -107,10 +115,7 @@ export default function AdminTopBar() {
 
               {/* Logout Button */}
               <button
-                onClick={() => {
-                  setShowDropdown(false);
-                  handleLogout();
-                }}
+                onClick={handleLogout}
                 className="w-full px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition"
               >
                 <LogOut size={16} />
@@ -120,6 +125,16 @@ export default function AdminTopBar() {
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={showLogoutConfirm}
+        onClose={() => setShowLogoutConfirm(false)}
+        onConfirm={confirmLogout}
+        title="Log Out"
+        message="Are you sure you want to log out?"
+        confirmText="Log Out"
+        type="warning"
+      />
     </header>
   );
 }

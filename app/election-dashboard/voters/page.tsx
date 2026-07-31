@@ -176,6 +176,7 @@ export default function VotersPage() {
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [rescheduleSendAt, setRescheduleSendAt] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
+  const [deletingAllVoters, setDeletingAllVoters] = useState(false);
 
   // Modal states
   const [alertModal, setAlertModal] = useState<{
@@ -646,6 +647,41 @@ export default function VotersPage() {
     });
   };
 
+  // Wipes every voter registered for the currently selected election.
+  // Voters who have already voted are kept (their votes stay intact).
+  const handleDeleteAllVoters = () => {
+    if (!selectedElection || voters.length === 0) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: "Delete All Voters",
+      message: `This permanently removes all ${voters.length} voter(s) registered for this election. Voters who have already voted will be kept to protect recorded results. This cannot be undone.`,
+      type: "danger",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        setDeletingAllVoters(true);
+        try {
+          const response = await authFetch(
+            `/api/elections/voters/bulk?electionId=${selectedElection}`,
+            { method: "DELETE" },
+          );
+          const data = await response.json();
+          if (response.ok) {
+            toast.success(data.message || "Voters deleted");
+            fetchVoters();
+          } else {
+            toast.error(data.error || "Failed to delete voters");
+          }
+        } catch (error) {
+          console.error("Delete all voters error:", error);
+          toast.error("Failed to delete voters");
+        } finally {
+          setDeletingAllVoters(false);
+        }
+      },
+    });
+  };
+
   const downloadTemplate = () => {
     const csv = `name,email,phone,voterId,department,class
 "John Doe","john@example.com","233552732025","STU001","Computer Science","2023"
@@ -821,6 +857,23 @@ export default function VotersPage() {
               >
                 <Upload size={18} />
                 Bulk Upload
+              </button>
+              <button
+                onClick={handleDeleteAllVoters}
+                disabled={deletingAllVoters || voters.length === 0}
+                title={
+                  voters.length === 0
+                    ? "No voters to delete"
+                    : `Delete all ${voters.length} voter(s) for this election`
+                }
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
+                  deletingAllVoters || voters.length === 0
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-red-600 text-white hover:bg-red-700"
+                }`}
+              >
+                <Trash2 size={18} />
+                {deletingAllVoters ? "Deleting…" : "Delete All"}
               </button>
             </div>
           </div>

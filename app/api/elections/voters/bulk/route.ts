@@ -391,9 +391,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Undo a bulk import: removes every voter created in one batch, unless they
-// have already voted (those are reported back but left intact to protect
-// real votes).
+// Bulk voter removal: either "undo a batch" (batchId given — removes just
+// that upload) or "delete all" (batchId omitted — removes every voter in
+// the election). Either way, voters who have already voted are skipped and
+// reported back rather than removed, to protect recorded results.
 export async function DELETE(req: NextRequest) {
   try {
     await connectDB();
@@ -412,8 +413,8 @@ export async function DELETE(req: NextRequest) {
     const batchId = searchParams.get('batchId');
     const electionId = searchParams.get('electionId');
 
-    if (!batchId || !electionId) {
-      return NextResponse.json({ error: 'batchId and electionId are required' }, { status: 400 });
+    if (!electionId) {
+      return NextResponse.json({ error: 'electionId is required' }, { status: 400 });
     }
 
     const election = await getAccessibleElection(decoded, electionId);
@@ -421,17 +422,19 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Election not found' }, { status: 404 });
     }
 
-    const batchVoters = await Voter.find({
-      electionId,
-      importBatchId: batchId,
-    });
+    const targetVoters = await Voter.find(
+      batchId ? { electionId, importBatchId: batchId } : { electionId }
+    );
 
-    if (batchVoters.length === 0) {
-      return NextResponse.json({ error: 'This upload batch was not found, or has already been removed.' }, { status: 404 });
+    if (targetVoters.length === 0) {
+      return NextResponse.json(
+        { error: batchId ? 'This upload batch was not found, or has already been removed.' : 'No voters found for this election.' },
+        { status: 404 }
+      );
     }
 
-    const removable = batchVoters.filter((v) => !v.hasVoted);
-    const blocked = batchVoters.filter((v) => v.hasVoted);
+    const removable = targetVoters.filter((v) => !v.hasVoted);
+    const blocked = targetVoters.filter((v) => v.hasVoted);
     const removableIds = removable.map((v) => v._id);
 
     await Promise.all([
@@ -441,10 +444,12 @@ export async function DELETE(req: NextRequest) {
 
     await logAudit({
       actor: { id: decoded.id, email: decoded.email, role: decoded.role },
-      action: 'voters.bulk_import_undo',
+      action: batchId ? 'voters.bulk_import_undo' : 'voters.delete_all',
       targetType: 'Election',
       targetId: String(electionId),
-      details: { batchId, removed: removable.length, blocked: blocked.length },
+      details: batchId
+        ? { batchId, removed: removable.length, blocked: blocked.length }
+        : { removed: removable.length, blocked: blocked.length },
     });
 
     return NextResponse.json({
@@ -452,7 +457,7 @@ export async function DELETE(req: NextRequest) {
       message:
         blocked.length > 0
           ? `Removed ${removable.length} voter(s). ${blocked.length} could not be removed because they have already voted.`
-          : `Removed ${removable.length} voter(s) from this upload.`,
+          : `Removed ${removable.length} voter(s)${batchId ? ' from this upload' : ''}.`,
       data: {
         removed: removable.length,
         blocked: blocked.length,
@@ -460,9 +465,9 @@ export async function DELETE(req: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error('Undo bulk import error:', error);
+    console.error('Delete voters error:', error);
     return NextResponse.json(
-      { error: 'Failed to undo upload', details: process.env.NODE_ENV === 'development' ? error.message : undefined },
+      { error: 'Failed to delete voters', details: process.env.NODE_ENV === 'development' ? error.message : undefined },
       { status: 500 }
     );
   }

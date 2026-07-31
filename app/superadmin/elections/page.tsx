@@ -5,6 +5,7 @@ import {
   Search,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   CheckCircle2,
   XCircle,
   RotateCcw,
@@ -13,6 +14,7 @@ import {
   UserCheck,
   Plus,
   Share2,
+  CheckCheck,
 } from "lucide-react";
 import AlertModal from "@/components/AlertModal";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -49,6 +51,16 @@ interface OrganizationOption {
   name: string;
   eventType: "awards" | "election";
 }
+
+interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+const ELECTIONS_PAGE_SIZE = 10;
+const CANDIDATES_PAGE_SIZE = 10;
 
 const BLANK_CREATE_FORM = {
   organizationId: "",
@@ -103,10 +115,14 @@ export default function SuperAdminElectionsPage() {
   const [assignTarget, setAssignTarget] = useState<SuperAdminElection | null>(null);
   const [assignSelectedIds, setAssignSelectedIds] = useState<Set<string>>(new Set());
   const [assigning, setAssigning] = useState(false);
+  const [electionsPage, setElectionsPage] = useState(1);
+  const [electionsPagination, setElectionsPagination] = useState<PaginationInfo | null>(null);
+  const [candidatePage, setCandidatePage] = useState<Record<string, number>>({});
+  const [candidatePagination, setCandidatePagination] = useState<Record<string, PaginationInfo>>({});
 
   useEffect(() => {
     fetchElections();
-  }, [search, approvalFilter]);
+  }, [search, approvalFilter, electionsPage]);
 
   const fetchOrganizations = async () => {
     try {
@@ -157,14 +173,39 @@ export default function SuperAdminElectionsPage() {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
       if (approvalFilter !== "all") params.set("approvalStatus", approvalFilter);
+      params.set("page", String(electionsPage));
+      params.set("limit", String(ELECTIONS_PAGE_SIZE));
       const res = await fetch(`/api/superadmin/elections?${params.toString()}`, {
         headers: authHeaders(),
       });
-      if (res.ok) setElections((await res.json()).data);
+      if (res.ok) {
+        const data = await res.json();
+        setElections(data.data);
+        setElectionsPagination(data.pagination);
+      }
     } catch {
       /* non-critical */
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCandidates = async (electionId: string, page: number) => {
+    setCandidatesLoading(true);
+    try {
+      const res = await fetch(
+        `/api/superadmin/candidates?electionId=${electionId}&page=${page}&limit=${CANDIDATES_PAGE_SIZE}`,
+        { headers: authHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setCandidatesByElection((prev) => ({ ...prev, [electionId]: data.data }));
+        setCandidatePagination((prev) => ({ ...prev, [electionId]: data.pagination }));
+      }
+    } catch {
+      /* non-critical */
+    } finally {
+      setCandidatesLoading(false);
     }
   };
 
@@ -175,20 +216,40 @@ export default function SuperAdminElectionsPage() {
     }
     setExpandedId(election._id);
     if (!candidatesByElection[election._id]) {
-      setCandidatesLoading(true);
-      try {
-        const res = await fetch(`/api/superadmin/candidates?electionId=${election._id}`, {
-          headers: authHeaders(),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setCandidatesByElection((prev) => ({ ...prev, [election._id]: data.data }));
-        }
-      } catch {
-        /* non-critical */
-      } finally {
-        setCandidatesLoading(false);
+      await fetchCandidates(election._id, candidatePage[election._id] || 1);
+    }
+  };
+
+  const changeCandidatePage = (electionId: string, newPage: number) => {
+    setCandidatePage((prev) => ({ ...prev, [electionId]: newPage }));
+    fetchCandidates(electionId, newPage);
+  };
+
+  const bulkApproveCandidates = async (electionId: string) => {
+    const key = `candidates-bulk:${electionId}`;
+    if (pendingKeys.has(key)) return;
+    setPendingKeys((prev) => new Set(prev).add(key));
+    try {
+      const res = await fetch(`/api/superadmin/candidates`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ electionId, decision: "approved" }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await fetchCandidates(electionId, candidatePage[electionId] || 1);
+        setAlertModal({ isOpen: true, title: "Candidates Approved", message: data.message, type: "success" });
+      } else {
+        setAlertModal({ isOpen: true, title: "Error", message: data.error || "Failed to approve all candidates", type: "error" });
       }
+    } catch {
+      setAlertModal({ isOpen: true, title: "Error", message: "Failed to approve all candidates", type: "error" });
+    } finally {
+      setPendingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -361,7 +422,7 @@ export default function SuperAdminElectionsPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900 leading-tight">Elections Monitor</h1>
         <p className="text-sm text-gray-400 mt-0.5">
-          {elections.length} election{elections.length !== 1 ? "s" : ""} across all organizations
+          {electionsPagination?.total ?? elections.length} election{(electionsPagination?.total ?? elections.length) !== 1 ? "s" : ""} across all organizations
         </p>
       </div>
 
@@ -372,13 +433,13 @@ export default function SuperAdminElectionsPage() {
             type="text"
             placeholder="Search by title or alias…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setElectionsPage(1); }}
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
           />
         </div>
         <select
           value={approvalFilter}
-          onChange={(e) => setApprovalFilter(e.target.value)}
+          onChange={(e) => { setApprovalFilter(e.target.value); setElectionsPage(1); }}
           className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
         >
           <option value="all">All Approval Statuses</option>
@@ -535,9 +596,25 @@ export default function SuperAdminElectionsPage() {
                     {expandedId === election._id && (
                       <tr>
                         <td colSpan={8} className="bg-gray-50/60 px-6 py-4">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">
-                            Candidates
-                          </p>
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                              Candidates
+                              {candidatePagination[election._id] && (
+                                <span className="normal-case font-normal text-gray-400"> ({candidatePagination[election._id].total})</span>
+                              )}
+                            </p>
+                            {(candidatesByElection[election._id] || []).length > 0 && (
+                              <button
+                                onClick={() => bulkApproveCandidates(election._id)}
+                                disabled={pendingKeys.has(`candidates-bulk:${election._id}`)}
+                                title="Approve all candidates in this election"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-xs font-semibold hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                <CheckCheck size={13} />
+                                {pendingKeys.has(`candidates-bulk:${election._id}`) ? "Approving…" : "Approve All"}
+                              </button>
+                            )}
+                          </div>
                           {candidatesLoading && !candidatesByElection[election._id] ? (
                             <p className="text-sm text-gray-400">Loading candidates…</p>
                           ) : (candidatesByElection[election._id] || []).length === 0 ? (
@@ -582,6 +659,31 @@ export default function SuperAdminElectionsPage() {
                               ))}
                             </div>
                           )}
+                          {candidatePagination[election._id] && candidatePagination[election._id].totalPages > 1 && (
+                            <div className="mt-3 flex items-center justify-between gap-4">
+                              <p className="text-xs text-gray-400">
+                                Page {candidatePagination[election._id].page} of {candidatePagination[election._id].totalPages}
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => changeCandidatePage(election._id, candidatePagination[election._id].page - 1)}
+                                  disabled={candidatePagination[election._id].page <= 1 || candidatesLoading}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                                >
+                                  <ChevronLeft size={13} />
+                                  Prev
+                                </button>
+                                <button
+                                  onClick={() => changeCandidatePage(election._id, candidatePagination[election._id].page + 1)}
+                                  disabled={candidatePagination[election._id].page >= candidatePagination[election._id].totalPages || candidatesLoading}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                                >
+                                  Next
+                                  <ChevronRight size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}
@@ -598,6 +700,32 @@ export default function SuperAdminElectionsPage() {
           </table>
         </div>
       </div>
+
+      {electionsPagination && electionsPagination.totalPages > 1 && (
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm text-gray-500">
+            Page {electionsPagination.page} of {electionsPagination.totalPages} · {electionsPagination.total} result{electionsPagination.total === 1 ? "" : "s"}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setElectionsPage((p) => Math.max(1, p - 1))}
+              disabled={electionsPage <= 1}
+              className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+            >
+              <ChevronLeft size={16} />
+              Prev
+            </button>
+            <button
+              onClick={() => setElectionsPage((p) => Math.min(electionsPagination.totalPages, p + 1))}
+              disabled={electionsPage >= electionsPagination.totalPages}
+              className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+            >
+              Next
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -756,7 +884,7 @@ export default function SuperAdminElectionsPage() {
                 <button
                   onClick={submitAssign}
                   disabled={assigning}
-                  className="px-6 py-2.5 text-sm font-semibold bg-[#d4af37] text-white rounded-xl hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-60"
+                  className="px-6 py-2.5 text-sm font-semibold bg-[#d4af37] text-white rounded-xl hover:bg-[#d4af37] transition-colors shadow-sm disabled:opacity-60"
                 >
                   {assigning ? "Saving…" : "Save Assignment"}
                 </button>

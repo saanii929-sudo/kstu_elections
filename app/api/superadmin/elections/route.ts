@@ -16,6 +16,11 @@ async function getAllElections(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const search = searchParams.get('search')?.trim();
     const approvalStatus = searchParams.get('approvalStatus');
+    // Optional — omitted (e.g. by the admins page's election picker) means
+    // "return everything", preserving that consumer's existing behavior.
+    const limitParam = searchParams.get('limit');
+    const limit = limitParam ? Math.max(1, parseInt(limitParam, 10)) : undefined;
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
 
     const match: any = {};
     if (search) {
@@ -81,7 +86,16 @@ async function getAllElections(req: NextRequest) {
       { $sort: { createdAt: -1 } },
     ]);
 
-    return NextResponse.json({ success: true, data: elections });
+    const total = elections.length;
+    const totalPages = limit ? Math.max(1, Math.ceil(total / limit)) : 1;
+    const start = limit ? (page - 1) * limit : 0;
+    const paged = limit ? elections.slice(start, start + limit) : elections;
+
+    return NextResponse.json({
+      success: true,
+      data: paged,
+      pagination: { page: limit ? page : 1, limit: limit ?? total, total, totalPages },
+    });
   } catch (error: any) {
     return NextResponse.json(
       { error: 'Failed to fetch elections', details: process.env.NODE_ENV === 'development' ? error.message : undefined },
