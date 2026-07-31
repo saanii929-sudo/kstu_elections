@@ -112,6 +112,11 @@ function ElectionHomeContent() {
       const res  = await fetch(`/api/elections/voter-status?token=${voterToken}`);
       const data = await res.json();
       if (data.success) {
+        // A voter can hold live credentials for several elections at once —
+        // this token is the one currently being viewed, so it's what future
+        // loads (e.g. a plain revisit of /election with no ?token=) should
+        // resolve to, not whichever election happened to be cached last.
+        localStorage.setItem("voterToken", voterToken);
         localStorage.setItem("voterData", JSON.stringify(data.data));
         setVoterData(data.data);
       }
@@ -121,12 +126,35 @@ function ElectionHomeContent() {
 
   useEffect(() => {
     const storedToken = urlToken || localStorage.getItem("voterToken");
-    const storedData  = localStorage.getItem("voterData");
-    if (storedToken && storedData) {
-      try { setVoterData(JSON.parse(storedData)); }
-      catch { localStorage.removeItem("voterData"); }
+    if (!storedToken) {
+      setLoading(false);
+      return;
     }
-    setLoading(false);
+
+    const storedData = localStorage.getItem("voterData");
+    if (storedData) {
+      try {
+        const parsed = JSON.parse(storedData);
+        // The cache only applies to the exact voter/election this token
+        // belongs to. A voter with credentials for multiple elections must
+        // never have one election's cached status (e.g. "already voted")
+        // leak into a different election just because it was cached last.
+        if (parsed.token === storedToken) {
+          setVoterData(parsed);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        localStorage.removeItem("voterData");
+      }
+    }
+
+    // No usable cache for this specific token — fetch it fresh instead of
+    // showing stale data (or nothing) for the wrong election.
+    (async () => {
+      await refreshVoterData(storedToken);
+      setLoading(false);
+    })();
   }, [urlToken]);
 
   useEffect(() => {

@@ -24,14 +24,16 @@ export default function NoAccessPage() {
           className="w-full max-w-md rounded-2xl bg-white/95 p-8 shadow-2xl backdrop-blur text-center"
         >
           <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-5">
-            <CheckCircle2 className="text-green-600" size={30} />
+            <CheckCircle2 className="text-red-500" size={30} />
           </div>
-          <h1 className="text-xl font-bold text-[#1C2338] mb-2">You've already voted</h1>
+          <h1 className="text-xl font-bold text-[#1C2338] mb-2">Invalid voting link</h1>
           <p className="text-sm text-gray-500 leading-relaxed">
-            You have already voted for this election.
+            This voting link is incomplete or malformed, so we can&apos;t identify which
+            election it&apos;s for.
           </p>
           <p className="text-sm text-gray-500 leading-relaxed mt-3">
-            The link you are trying to access is invalid or has already been used.
+            If you have multiple election credentials, make sure you&apos;re opening the
+            exact link sent to you for this specific election, then try again.
           </p>
         </motion.div>
       </div>

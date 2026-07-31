@@ -98,33 +98,15 @@ function VoterLoginPageInner() {
   const [pendingVoterData, setPendingVoterData] = useState<any>(null);
   const digitRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Check if voter is already authenticated
-  useEffect(() => {
-    const voterToken = localStorage.getItem("voterToken");
-    const voterData = localStorage.getItem("voterData");
-    const tokenTimestamp = localStorage.getItem("voterTokenTimestamp");
-
-    if (voterToken && voterData && tokenTimestamp) {
-      try {
-        const data = JSON.parse(voterData);
-        const timestamp = parseInt(tokenTimestamp);
-        const now = Date.now();
-        const sixHours = 6 * 60 * 60 * 1000;
-
-        if (now - timestamp > sixHours) {
-          localStorage.removeItem("voterToken");
-          localStorage.removeItem("voterData");
-          localStorage.removeItem("voterTokenTimestamp");
-        } else if (!data.hasVoted) {
-          router.push(`/election?token=${voterToken}`);
-        }
-      } catch {
-        localStorage.removeItem("voterToken");
-        localStorage.removeItem("voterData");
-        localStorage.removeItem("voterTokenTimestamp");
-      }
-    }
-  }, [router]);
+  // Deliberately no "already authenticated, skip the form" auto-redirect
+  // here. A voter can hold live credentials for several elections at once —
+  // any cached session in localStorage belongs to whichever election they
+  // logged into most recently, which is not necessarily this link's
+  // election. Redirecting on that alone would silently bounce them into the
+  // wrong election (or make a fully-voted election look like this one is
+  // "already voted"). The verify-link check below is what's actually scoped
+  // to this specific link, and already redirects to the thank-you page when
+  // *this* election's own voter record shows they've voted.
 
   // Resend cooldown countdown
   useEffect(() => {
