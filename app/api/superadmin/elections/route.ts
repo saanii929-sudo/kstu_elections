@@ -3,7 +3,6 @@ import connectDB from '@/lib/mongodb';
 import Election from '@/models/Election';
 import Candidate from '@/models/Candidate';
 import Voter from '@/models/Voter';
-import ElectionVote from '@/models/ElectionVote';
 import Organization from '@/models/Organization';
 import { withAuth } from '@/middleware/auth';
 import { normalizeAlias, isValidAlias, getElectionStatus } from '@/lib/electionStatus';
@@ -66,23 +65,22 @@ async function getAllElections(req: NextRequest) {
         },
       },
       {
-        $lookup: {
-          from: ElectionVote.collection.name,
-          localField: '_id',
-          foreignField: 'electionId',
-          as: 'votes',
-        },
-      },
-      {
         $addFields: {
           organizationName: { $arrayElemAt: ['$organization.name', 0] },
           assignedOrganizationNames: '$assignedOrganizations.name',
           candidateCount: { $size: '$candidates' },
           voterCount: { $size: '$voters' },
-          totalVotes: { $size: '$votes' },
+          // Voters who have voted, not ElectionVote documents — a voter who
+          // votes across multiple positions creates one ElectionVote per
+          // position (see models/ElectionVote.ts's {voterId, categoryId}
+          // uniqueness), which would otherwise inflate this well past the
+          // number of people who actually voted.
+          totalVotes: {
+            $size: { $filter: { input: '$voters', as: 'v', cond: '$$v.hasVoted' } },
+          },
         },
       },
-      { $project: { organization: 0, assignedOrganizations: 0, candidates: 0, voters: 0, votes: 0 } },
+      { $project: { organization: 0, assignedOrganizations: 0, candidates: 0, voters: 0 } },
       { $sort: { createdAt: -1 } },
     ]);
 

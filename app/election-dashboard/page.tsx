@@ -10,6 +10,7 @@ export default function ElectionDashboardPage() {
     activeElections: 0,
     totalVoters: 0,
     totalVotes: 0,
+    votedCount: 0,
     totalCandidates: 0,
     turnoutRate: 0,
   });
@@ -114,7 +115,7 @@ export default function ElectionDashboardPage() {
     },
     {
       title: 'Total Votes Cast',
-      value: stats.totalVotes,
+      value: stats.votedCount,
       icon: CheckCircle,
       color: 'orange',
       bgColor: 'bg-orange-50',
