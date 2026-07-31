@@ -12,10 +12,8 @@ import { isElectionManager, electionListMatch } from '@/lib/electionAccess';
 
 const STATUS_SORT_ORDER: Record<ElectionStatusKey, number> = {
   live: 0,
-  pending: 1,
-  scheduled: 2,
-  draft: 3,
-  closed: 4,
+  scheduled: 1,
+  closed: 2,
 };
 
 export async function GET(req: NextRequest) {
@@ -34,7 +32,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const search = searchParams.get('search')?.trim();
-    const statusFilter = searchParams.get('status'); // live|pending|scheduled|draft|closed|all
+    const statusFilter = searchParams.get('status'); // live|scheduled|closed|all
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
     const sortBy = searchParams.get('sortBy') || 'date'; // date|status|createdDate

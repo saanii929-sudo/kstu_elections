@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
     if (!eligibility.ok) {
       await logAttempt(false, { failureReason: 'ineligible', electionId: voter.electionId, voterId: voter._id });
       return NextResponse.json(
-        { error: eligibility.error, startDate: eligibility.startDate },
+        { error: eligibility.error, startDate: eligibility.startDate, reason: eligibility.reason },
         { status: eligibility.status }
       );
     }

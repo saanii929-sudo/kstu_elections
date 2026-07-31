@@ -5,6 +5,11 @@ export interface IElectionVote extends Document {
   voterId: mongoose.Types.ObjectId;
   categoryId: mongoose.Types.ObjectId;
   candidateId: mongoose.Types.ObjectId;
+  // Only meaningful for a single-candidate ("referendum") position — the
+  // voter explicitly approved or rejected the sole candidate. Always 'yes'
+  // for any position with more than one candidate, where this is a normal
+  // vote-for selection, not a real choice between yes/no.
+  voteType: 'yes' | 'no';
   organizationId: mongoose.Types.ObjectId;
   voterToken: string;
   // Best-effort forensic trail — the IP the vote was cast from, for
@@ -36,6 +41,12 @@ const ElectionVoteSchema: Schema = new Schema(
     candidateId: {
       type: Schema.Types.ObjectId,
       ref: 'Candidate',
+      required: true,
+    },
+    voteType: {
+      type: String,
+      enum: ['yes', 'no'],
+      default: 'yes',
       required: true,
     },
     organizationId: {

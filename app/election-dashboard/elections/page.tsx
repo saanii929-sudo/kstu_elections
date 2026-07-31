@@ -80,9 +80,7 @@ const PAGE_SIZE = 9;
 const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All Statuses" },
   { value: "live", label: "Live" },
-  { value: "pending", label: "Pending" },
   { value: "scheduled", label: "Scheduled" },
-  { value: "draft", label: "Draft" },
   { value: "closed", label: "Closed" },
 ];
 
@@ -412,9 +410,7 @@ export default function ElectionsPage() {
   // Stats (derived from the unfiltered snapshot, not the paginated/filtered list)
   const totalCount = statsElections.length;
   const liveCount = statsElections.filter((e) => getElectionStatus(e) === "live").length;
-  const pendingCount = statsElections.filter((e) => getElectionStatus(e) === "pending").length;
   const scheduledCount = statsElections.filter((e) => getElectionStatus(e) === "scheduled").length;
-  const draftCount = statsElections.filter((e) => getElectionStatus(e) === "draft").length;
   const closedCount = statsElections.filter((e) => getElectionStatus(e) === "closed").length;
 
   // For an electionAdmin, the organizations they can create a new election
@@ -494,17 +490,9 @@ export default function ElectionsPage() {
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
                 Live: {liveCount}
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 text-lg font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
-                Pending: {pendingCount}
-              </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 text-lg font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
                 Scheduled: {scheduledCount}
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 text-lg font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
-                Draft: {draftCount}
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 text-lg font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />

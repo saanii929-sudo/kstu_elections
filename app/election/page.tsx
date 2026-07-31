@@ -65,7 +65,7 @@ function CountdownDisplay({
       <div className="flex items-start gap-3 sm:gap-4">
         {units.map(({ l, v }) => (
           <div key={l} className="flex flex-col items-center gap-1.5">
-            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl border-2 border-[#d4af37] bg-green-100 flex items-center justify-center">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl border-2 border-[#d4af37] bg-blue-200 flex items-center justify-center">
               <span className="text-xl sm:text-2xl font-bold text-green-500 tabular-nums">{pad(v)}</span>
             </div>
             <span className="text-xs text-gray-500 font-medium">{l}</span>

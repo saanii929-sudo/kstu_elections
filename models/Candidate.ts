@@ -10,6 +10,11 @@ export interface ICandidate extends Document {
   manifesto?: string;
   ballotNumber: number;
   voteCount: number;
+  // Only meaningful when this is the sole candidate in its category — a
+  // count of voters who explicitly rejected them via the YES/NO ballot
+  // choice, kept separate from voteCount so referendum results never get
+  // conflated with normal candidate votes.
+  noVoteCount: number;
   // Advisory oversight only — does not block the candidate from appearing on the ballot.
   approvalStatus: 'pending' | 'approved' | 'rejected';
   createdAt: Date;
@@ -54,6 +59,10 @@ const CandidateSchema: Schema = new Schema(
       required: [true, 'Ballot number is required'],
     },
     voteCount: {
+      type: Number,
+      default: 0,
+    },
+    noVoteCount: {
       type: Number,
       default: 0,
     },

@@ -1,4 +1,4 @@
-export type ElectionStatusKey = "draft" | "scheduled" | "pending" | "live" | "closed";
+export type ElectionStatusKey = "scheduled" | "live" | "closed";
 
 export interface ElectionLike {
   status: string;
@@ -14,9 +14,10 @@ export interface ElectionStatusInfo {
 }
 
 /**
- * Derives the display status of an election from its stored status plus schedule.
- * "pending" covers an election left in draft whose start time has already arrived —
- * it should be live but is waiting on an admin to activate it.
+ * Derives the display status of an election purely from its schedule — mirrors
+ * the date-only gating that voter eligibility (lib/voterEligibility.ts) and
+ * vote-casting already use, so the badge never disagrees with what voters can
+ * actually do. Stored `status` only matters for early termination ("ended").
  */
 export function getElectionStatus(election: ElectionLike): ElectionStatusKey {
   const now = new Date();
@@ -24,11 +25,6 @@ export function getElectionStatus(election: ElectionLike): ElectionStatusKey {
   const end = new Date(election.endDate);
 
   if (election.status === "ended" || now > end) return "closed";
-
-  if (election.status === "draft") {
-    return now >= start ? "pending" : "draft";
-  }
-
   if (now < start) return "scheduled";
   return "live";
 }
@@ -39,18 +35,6 @@ const ELECTION_STATUS_META: Record<ElectionStatusKey, Omit<ElectionStatusInfo, "
     dotColor: "bg-emerald-500",
     badgeClass:
       "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/30",
-  },
-  pending: {
-    label: "Pending",
-    dotColor: "bg-amber-500",
-    badgeClass:
-      "bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/30",
-  },
-  draft: {
-    label: "Draft",
-    dotColor: "bg-gray-400",
-    badgeClass:
-      "bg-gray-100 text-gray-600 ring-1 ring-gray-200 dark:bg-gray-500/10 dark:text-gray-300 dark:ring-gray-500/30",
   },
   scheduled: {
     label: "Scheduled",

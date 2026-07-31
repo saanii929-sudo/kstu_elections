@@ -41,8 +41,12 @@ function VotingPageContent() {
   const [voterData, setVoterData] = useState<any>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  // voteType is only ever 'no' for a single-candidate position where the
+  // voter explicitly rejected the sole candidate — every other selection
+  // (including single-candidate approval) is 'yes'. A category isn't
+  // present here at all until the voter has answered it.
   const [selectedVotes, setSelectedVotes] = useState<{
-    [categoryId: string]: string | null;
+    [categoryId: string]: { candidateId: string; voteType: "yes" | "no" };
   }>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -60,8 +64,9 @@ function VotingPageContent() {
     const data = JSON.parse(storedData);
 
     if (data.hasVoted) {
-      toast.error("You have already voted!");
-      router.push(`/election?token=${token}`);
+      localStorage.removeItem("voterData");
+      localStorage.removeItem("voterToken");
+      router.push("/election/thank-you");
       return;
     }
 
@@ -95,16 +100,19 @@ function VotingPageContent() {
   const handleSelectCandidate = (categoryId: string, candidateId: string) => {
     setSelectedVotes((prev) => ({
       ...prev,
-      [categoryId]: candidateId,
+      [categoryId]: { candidateId, voteType: "yes" },
     }));
   };
 
-  const handleSkipCandidate = (categoryId: string) => {
+  // Only offered when a position has exactly one candidate — an explicit
+  // rejection of that candidate, not a skip. Still references the
+  // candidate's id, since the vote needs to record who it was cast against.
+  const handleRejectCandidate = (categoryId: string, candidateId: string) => {
     setSelectedVotes((prev) => ({
       ...prev,
-      [categoryId]: null,
+      [categoryId]: { candidateId, voteType: "no" },
     }));
-    toast.success("Position No");
+    toast.success("Recorded as No");
   };
 
   const handleNextStep = () => {
@@ -146,12 +154,13 @@ function VotingPageContent() {
     setSubmitting(true);
 
     try {
-      const votes = Object.entries(selectedVotes)
-        .filter(([_, candidateId]) => candidateId !== null)
-        .map(([categoryId, candidateId]) => ({
+      const votes = Object.entries(selectedVotes).map(
+        ([categoryId, answer]) => ({
           categoryId,
-          candidateId: candidateId as string,
-        }));
+          candidateId: answer.candidateId,
+          voteType: answer.voteType,
+        }),
+      );
 
       const response = await fetch("/api/elections/vote", {
         method: "POST",
@@ -167,12 +176,9 @@ function VotingPageContent() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        toast.success("Vote submitted successfully! Logging out...");
         localStorage.removeItem("voterData");
         localStorage.removeItem("voterToken");
-        setTimeout(() => {
-          router.push("/election/login");
-        }, 2000);
+        router.push("/election/thank-you");
       } else {
         toast.error(data.error || "Failed to submit vote");
         setSubmitting(false);
@@ -191,7 +197,6 @@ function VotingPageContent() {
       .filter((c) => c.categoryId._id === categoryId)
       .sort((a, b) => (a.ballotNumber || 0) - (b.ballotNumber || 0));
   };
-
 
   if (loading) {
     return (
@@ -234,7 +239,9 @@ function VotingPageContent() {
                 <p className="text-xs sm:text-sm font-medium text-gray-900 truncate max-w-25 sm:max-w-none">
                   {voterData?.name}
                 </p>
-                <p className="text-xs text-gray-500 font-mono hidden sm:block">{token}</p>
+                <p className="text-xs text-gray-500 font-mono hidden sm:block">
+                  {token}
+                </p>
               </div>
             </div>
           </div>
@@ -246,8 +253,7 @@ function VotingPageContent() {
                 Position {currentStep + 1} of {categories.length}
               </span>
               <span className="text-sm text-gray-500">
-                {Object.values(selectedVotes).filter((v) => v !== null).length}{" "}
-                voted
+                {Object.keys(selectedVotes).length} answered
               </span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2.5">
@@ -269,7 +275,7 @@ function VotingPageContent() {
             (() => {
               const category = categories[currentStep];
               const categoryCandidates = getCandidatesByCategory(category._id);
-              const isSkipped = selectedVotes[category._id] === null;
+              const isSkipped = selectedVotes[category._id]?.voteType === "no";
 
               return (
                 <div className="bg-white  rounded-xl border border-gray-200">
@@ -299,7 +305,9 @@ function VotingPageContent() {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                           {categoryCandidates.map((candidate) => {
                             const isSelected =
-                              selectedVotes[category._id] === candidate._id;
+                              selectedVotes[category._id]?.candidateId ===
+                                candidate._id &&
+                              selectedVotes[category._id]?.voteType === "yes";
 
                             return (
                               <React.Fragment key={candidate._id}>
@@ -316,14 +324,22 @@ function VotingPageContent() {
                                       : "border-gray-200 hover:border-[#d4af37] hover:bg-gray-50 hover:shadow-md"
                                   }`}
                                 >
-                                  <div className={`absolute top-4 right-4 w-12 h-12 rounded-full shadow-lg flex items-center justify-center border-2 transition-all ${
-                                    isSelected 
-                                      ? "bg-[#d4af37] border-[#d4af37]" 
-                                      : "bg-white border-[#d4af37]"
-                                  }`}>
-                                    <span className={`text-base font-bold ${
-                                      isSelected ? "text-white" : "text-[#d4af37]"
-                                    }`}>{candidate.ballotNumber}</span>
+                                  <div
+                                    className={`absolute top-4 right-4 w-12 h-12 rounded-full shadow-lg flex items-center justify-center border-2 transition-all ${
+                                      isSelected
+                                        ? "bg-[#d4af37] border-[#d4af37]"
+                                        : "bg-white border-[#d4af37]"
+                                    }`}
+                                  >
+                                    <span
+                                      className={`text-base font-bold ${
+                                        isSelected
+                                          ? "text-white"
+                                          : "text-[#d4af37]"
+                                      }`}
+                                    >
+                                      {candidate.ballotNumber}
+                                    </span>
                                   </div>
 
                                   <div className="flex flex-col items-center text-center gap-4 mb-4">
@@ -331,46 +347,62 @@ function VotingPageContent() {
                                       <img
                                         src={candidate.image}
                                         alt={candidate.name}
-                                        className={`w-36 h-50 rounded-xl object-contain object-top border-4 transition-all ${
+                                        className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-[3/4] rounded-xl object-cover object-top border-4 transition-all ${
                                           isSelected
                                             ? "border-[#d4af37] shadow-xl"
                                             : "border-gray-200 group-hover:border-[#d4af37]"
                                         }`}
                                       />
                                     ) : (
-                                      <div className={`w-36 h-44 rounded-xl flex items-center justify-center border-4 transition-all ${
-                                        isSelected
-                                          ? "bg-[#d4af37] border-[#d4af37] shadow-xl"
-                                          : "bg-green-100 border-gray-200 group-hover:border-[#d4af37]"
-                                      }`}>
+                                      <div
+                                        className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-[3/4] rounded-xl flex items-center justify-center border-4 transition-all ${
+                                          isSelected
+                                            ? "bg-[#d4af37] border-[#d4af37] shadow-xl"
+                                            : "bg-green-100 border-gray-200 group-hover:border-[#d4af37]"
+                                        }`}
+                                      >
                                         <Users
-                                          className={isSelected ? "text-white" : "text-[#d4af37]"}
+                                          className={
+                                            isSelected
+                                              ? "text-white"
+                                              : "text-[#d4af37]"
+                                          }
                                           size={48}
                                         />
                                       </div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                      <h4 className={`font-bold text-lg mb-2 ${
-                                        isSelected ? "text-[#1c2338]" : "text-gray-900"
-                                      }`}>
+                                      <h4
+                                        className={`font-bold text-lg mb-2 ${
+                                          isSelected
+                                            ? "text-[#1c2338]"
+                                            : "text-gray-900"
+                                        }`}
+                                      >
                                         {candidate.name}
                                       </h4>
                                     </div>
                                   </div>
-                                  
+
                                   {isSelected ? (
                                     <div className="flex items-center justify-center gap-2 bg-[#d4af37] text-white py-2 rounded-lg font-semibold">
                                       <CheckCircle size={20} />
                                       <span>Selected</span>
                                     </div>
-                                  ): (<div className="flex items-center justify-center gap-2 bg-[#ebdeb2] text-white py-2 rounded-lg font-semibold">
-                                      
+                                  ) : (
+                                    <div className="flex items-center justify-center gap-2 bg-[#ebdeb2] text-white py-2 rounded-lg font-semibold">
                                       <span>Select</span>
-                                    </div>)}
+                                    </div>
+                                  )}
                                 </button>
 
                                 <button
-                                  onClick={() => handleSkipCandidate(category._id)}
+                                  onClick={() =>
+                                    handleRejectCandidate(
+                                      category._id,
+                                      candidate._id,
+                                    )
+                                  }
                                   className={`group text-left p-6 rounded-2xl border-2 transition-all duration-200 flex items-center justify-center ${
                                     isSkipped
                                       ? "border-[#d4af37] shadow-lg scale-[1.02]"
@@ -378,16 +410,22 @@ function VotingPageContent() {
                                   }`}
                                 >
                                   <div className="flex flex-col items-center gap-4">
-                                    <div className={`w-30 h-30 rounded-full flex items-center justify-center border-4 transition-all ${
-                                      isSkipped 
-                                        ? " border-[#d4af37] shadow-xl" 
-                                        : "bg-gray-100 border-gray-300 group-hover:border-[#d4af37]"
-                                    }`}>
-                                    <h4 className={`font-bold text-6xl ${
-                                      isSkipped ? "text-[#1c2338]" : "text-gray-400"
-                                    }`}>
-                                      NO
-                                    </h4>
+                                    <div
+                                      className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full flex items-center justify-center border-4 transition-all ${
+                                        isSkipped
+                                          ? " border-[#d4af37] shadow-xl"
+                                          : "bg-gray-100 border-gray-300 group-hover:border-[#d4af37]"
+                                      }`}
+                                    >
+                                      <h4
+                                        className={`font-bold text-6xl sm:text-7xl ${
+                                          isSkipped
+                                            ? "text-[#1c2338]"
+                                            : "text-gray-400"
+                                        }`}
+                                      >
+                                        NO
+                                      </h4>
                                     </div>
                                     {isSkipped && (
                                       <div className="flex items-center justify-center gap-2 bg-[#d4af37] text-white py-2 px-4 rounded-lg font-semibold">
@@ -407,7 +445,8 @@ function VotingPageContent() {
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                           {categoryCandidates.map((candidate) => {
                             const isSelected =
-                              selectedVotes[category._id] === candidate._id;
+                              selectedVotes[category._id]?.candidateId ===
+                              candidate._id;
 
                             return (
                               <button
@@ -425,14 +464,22 @@ function VotingPageContent() {
                                 }`}
                               >
                                 {/* Ballot Number Badge */}
-                                <div className={`absolute top-4 right-4 w-12 h-12 rounded-full shadow-lg flex items-center justify-center border-2 transition-all ${
-                                  isSelected 
-                                    ? "bg-[#d4af37] border-[#d4af37]" 
-                                    : "bg-white border-[#d4af37]"
-                                }`}>
-                                  <span className={`text-base font-bold ${
-                                    isSelected ? "text-white" : "text-[#d4af37]"
-                                  }`}>{candidate.ballotNumber}</span>
+                                <div
+                                  className={`absolute top-4 right-4 w-12 h-12 rounded-full shadow-lg flex items-center justify-center border-2 transition-all ${
+                                    isSelected
+                                      ? "bg-[#d4af37] border-[#d4af37]"
+                                      : "bg-white border-[#d4af37]"
+                                  }`}
+                                >
+                                  <span
+                                    className={`text-base font-bold ${
+                                      isSelected
+                                        ? "text-white"
+                                        : "text-[#d4af37]"
+                                    }`}
+                                  >
+                                    {candidate.ballotNumber}
+                                  </span>
                                 </div>
 
                                 <div className="flex flex-col items-center text-center gap-4 mb-4">
@@ -440,37 +487,52 @@ function VotingPageContent() {
                                     <img
                                       src={candidate.image}
                                       alt={candidate.name}
-                                      className={`w-full h-44 rounded-xl object-cover object-top border-4 transition-all ${
+                                      className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-[3/4] rounded-xl object-cover object-top border-4 transition-all ${
                                         isSelected
                                           ? "border-[#d4af37] shadow-xl"
                                           : "border-gray-200 group-hover:border-[#d4af37]"
                                       }`}
                                     />
                                   ) : (
-                                    <div className={`w-full h-44 rounded-xl flex items-center justify-center border-4 transition-all ${
-                                      isSelected
-                                        ? "bg-[#d4af37] border-[#d4af37] shadow-xl"
-                                        : "bg-green-100 border-gray-200 group-hover:border-[#d4af37]"
-                                    }`}>
+                                    <div
+                                      className={`w-full h-44 rounded-xl flex items-center justify-center border-4 transition-all ${
+                                        isSelected
+                                          ? "bg-[#d4af37] border-[#d4af37] shadow-xl"
+                                          : "bg-green-100 border-gray-200 group-hover:border-[#d4af37]"
+                                      }`}
+                                    >
                                       <Users
-                                        className={isSelected ? "text-white" : "text-[#d4af37]"}
+                                        className={
+                                          isSelected
+                                            ? "text-white"
+                                            : "text-[#d4af37]"
+                                        }
                                         size={48}
                                       />
                                     </div>
                                   )}
                                   <div className="flex-1 min-w-0">
-                                    <h4 className={`font-bold text-lg mb-2 ${
-                                      isSelected ? "text-[#1c2338]" : "text-gray-900"
-                                    }`}>
+                                    <h4
+                                      className={`font-bold text-lg mb-2 ${
+                                        isSelected
+                                          ? "text-[#1c2338]"
+                                          : "text-gray-900"
+                                      }`}
+                                    >
                                       {candidate.name}
                                     </h4>
                                   </div>
                                 </div>
-                                
-                                {isSelected && (
+
+                                {isSelected ? (
                                   <div className="flex items-center justify-center gap-2 bg-[#d4af37] text-white py-2 rounded-lg font-semibold">
                                     <CheckCircle size={20} />
                                     <span>Selected</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-center gap-2 bg-[#ebdeb2] text-white py-2 rounded-lg font-semibold">
+                                    <CheckCircle size={20} />
+                                    <span>Select</span>
                                   </div>
                                 )}
                               </button>
@@ -526,40 +588,42 @@ function VotingPageContent() {
                 Review Your Votes
               </h2>
               <p className="text-gray-600">
-                Please confirm your selections below. This action cannot be undone.
+                Please confirm your selections below. This action cannot be
+                undone.
               </p>
             </div>
 
             {/* Full preview of all selections */}
             <div className="mb-6 space-y-3 max-h-80 overflow-y-auto border border-gray-200 rounded-xl p-4 bg-gray-50">
               {categories.map((category) => {
-                const selectedCandidateId = selectedVotes[category._id];
-                const selectedCandidate = selectedCandidateId
-                  ? candidates.find((c) => c._id === selectedCandidateId)
+                const answer = selectedVotes[category._id];
+                const candidate = answer
+                  ? candidates.find((c) => c._id === answer.candidateId)
                   : null;
-                const isSkipped = selectedCandidateId === null;
+                const isNo = answer?.voteType === "no";
+                const isYes = answer?.voteType === "yes" && !!candidate;
 
                 return (
                   <div
                     key={category._id}
                     className={`flex items-center gap-3 p-3 rounded-lg border ${
-                      isSkipped
-                        ? "border-gray-200 bg-white"
-                        : selectedCandidate
-                        ? "border-green-200 bg-green-50"
-                        : "border-orange-200 bg-orange-50"
+                      isNo
+                        ? "border-red-200 bg-red-50"
+                        : isYes
+                          ? "border-green-200 bg-green-50"
+                          : "border-orange-200 bg-orange-50"
                     }`}
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">
                         {category.name}
                       </p>
-                      {selectedCandidate ? (
+                      {isYes && candidate ? (
                         <div className="flex items-center gap-2 mt-1">
-                          {selectedCandidate.image ? (
+                          {candidate.image ? (
                             <img
-                              src={selectedCandidate.image}
-                              alt={selectedCandidate.name}
+                              src={candidate.image}
+                              alt={candidate.name}
                               className="w-8 h-8 rounded-full object-cover border border-green-300 shrink-0"
                             />
                           ) : (
@@ -568,25 +632,48 @@ function VotingPageContent() {
                             </div>
                           )}
                           <p className="font-semibold text-gray-900 truncate">
-                            {selectedCandidate.name}
+                            {candidate.name}
                           </p>
-                          {selectedCandidate.ballotNumber && (
+                          {candidate.ballotNumber && (
                             <span className="text-xs bg-[#d4af37] text-white px-1.5 py-0.5 rounded font-bold shrink-0">
-                              #{selectedCandidate.ballotNumber}
+                              #{candidate.ballotNumber}
                             </span>
                           )}
                         </div>
-                      ) : isSkipped ? (
-                        <p className="text-sm text-gray-400 mt-1 italic">No</p>
+                      ) : isNo ? (
+                        <div className="flex items-center gap-2 mt-1">
+                          {candidate?.image ? (
+                            <img
+                              src={candidate.image}
+                              alt={candidate.name}
+                              className="w-8 h-8 rounded-full object-cover border border-red-300 shrink-0 opacity-70"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                              <XCircle className="text-red-500" size={14} />
+                            </div>
+                          )}
+                          <p className="font-semibold text-gray-900 truncate">
+                            NO
+                            {candidate && (
+                              <span className="text-gray-500 font-normal">
+                                {" "}
+                                — {candidate.name}
+                              </span>
+                            )}
+                          </p>
+                        </div>
                       ) : (
-                        <p className="text-sm text-orange-600 mt-1">Not selected</p>
+                        <p className="text-sm text-orange-600 mt-1">
+                          Not selected
+                        </p>
                       )}
                     </div>
                     <div className="shrink-0">
-                      {selectedCandidate ? (
+                      {isYes ? (
                         <CheckCircle className="text-[#d4af37]" size={20} />
-                      ) : isSkipped ? (
-                        <XCircle className="text-gray-400" size={20} />
+                      ) : isNo ? (
+                        <XCircle className="text-red-500" size={20} />
                       ) : (
                         <XCircle className="text-orange-500" size={20} />
                       )}
@@ -597,8 +684,16 @@ function VotingPageContent() {
             </div>
 
             <p className="text-xs text-center text-gray-500 mb-4">
-              {Object.values(selectedVotes).filter((v) => v !== null).length} vote(s) selected ·{" "}
-              {Object.values(selectedVotes).filter((v) => v === null).length} No
+              {
+                Object.values(selectedVotes).filter((v) => v.voteType === "yes")
+                  .length
+              }{" "}
+              vote(s) selected ·{" "}
+              {
+                Object.values(selectedVotes).filter((v) => v.voteType === "no")
+                  .length
+              }{" "}
+              No
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">

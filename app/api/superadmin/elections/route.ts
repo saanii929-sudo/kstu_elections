@@ -38,6 +38,14 @@ async function getAllElections(req: NextRequest) {
       },
       {
         $lookup: {
+          from: Organization.collection.name,
+          localField: 'assignedOrganizationIds',
+          foreignField: '_id',
+          as: 'assignedOrganizations',
+        },
+      },
+      {
+        $lookup: {
           from: Candidate.collection.name,
           localField: '_id',
           foreignField: 'electionId',
@@ -63,12 +71,13 @@ async function getAllElections(req: NextRequest) {
       {
         $addFields: {
           organizationName: { $arrayElemAt: ['$organization.name', 0] },
+          assignedOrganizationNames: '$assignedOrganizations.name',
           candidateCount: { $size: '$candidates' },
           voterCount: { $size: '$voters' },
           totalVotes: { $size: '$votes' },
         },
       },
-      { $project: { organization: 0, candidates: 0, voters: 0, votes: 0 } },
+      { $project: { organization: 0, assignedOrganizations: 0, candidates: 0, voters: 0, votes: 0 } },
       { $sort: { createdAt: -1 } },
     ]);
 

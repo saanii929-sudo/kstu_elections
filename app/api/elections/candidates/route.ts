@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
       : candidates.map((c) => {
           const obj: any = c.toObject();
           delete obj.voteCount;
+          delete obj.noVoteCount;
           return obj;
         });
 

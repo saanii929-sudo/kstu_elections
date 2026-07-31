@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const eligibility = await checkVoterEligibility(voter);
     if (!eligibility.ok) {
       return NextResponse.json(
-        { error: eligibility.error, startDate: eligibility.startDate },
+        { error: eligibility.error, startDate: eligibility.startDate, reason: eligibility.reason },
         { status: eligibility.status }
       );
     }

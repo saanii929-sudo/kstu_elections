@@ -12,6 +12,7 @@ import {
   Vote,
   UserCheck,
   Plus,
+  Share2,
 } from "lucide-react";
 import AlertModal from "@/components/AlertModal";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -21,7 +22,10 @@ interface SuperAdminElection {
   _id: string;
   title: string;
   alias: string;
+  organizationId: string;
   organizationName: string;
+  assignedOrganizationIds: string[];
+  assignedOrganizationNames: string[];
   status: string;
   startDate: string;
   endDate: string;
@@ -96,6 +100,9 @@ export default function SuperAdminElectionsPage() {
   const [organizations, setOrganizations] = useState<OrganizationOption[]>([]);
   const [createForm, setCreateForm] = useState(BLANK_CREATE_FORM);
   const [creating, setCreating] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<SuperAdminElection | null>(null);
+  const [assignSelectedIds, setAssignSelectedIds] = useState<Set<string>>(new Set());
+  const [assigning, setAssigning] = useState(false);
 
   useEffect(() => {
     fetchElections();
@@ -256,6 +263,44 @@ export default function SuperAdminElectionsPage() {
     }
   };
 
+  const openAssignModal = (election: SuperAdminElection) => {
+    setAssignTarget(election);
+    setAssignSelectedIds(new Set(election.assignedOrganizationIds || []));
+    if (organizations.length === 0) fetchOrganizations();
+  };
+
+  const toggleAssignOrg = (orgId: string) => {
+    setAssignSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orgId)) next.delete(orgId);
+      else next.add(orgId);
+      return next;
+    });
+  };
+
+  const submitAssign = async () => {
+    if (!assignTarget) return;
+    setAssigning(true);
+    try {
+      const res = await fetch(`/api/superadmin/elections/${assignTarget._id}/organizations`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ organizationIds: Array.from(assignSelectedIds) }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAssignTarget(null);
+        fetchElections();
+      } else {
+        setAlertModal({ isOpen: true, title: "Error", message: data.error || "Failed to update assigned organizations", type: "error" });
+      }
+    } catch {
+      setAlertModal({ isOpen: true, title: "Error", message: "Failed to update assigned organizations", type: "error" });
+    } finally {
+      setAssigning(false);
+    }
+  };
+
   const openResetModal = (election: SuperAdminElection) => {
     setResetReason("");
     setResetTarget(election);
@@ -391,7 +436,17 @@ export default function SuperAdminElectionsPage() {
                         <p className="font-semibold text-gray-900">{election.title}</p>
                         <p className="text-xs text-gray-400 font-mono">{election.alias}</p>
                       </td>
-                      <td className="py-3.5 px-4 text-gray-600">{election.organizationName || "—"}</td>
+                      <td className="py-3.5 px-4 text-gray-600">
+                        <p>{election.organizationName || "—"}</p>
+                        {election.assignedOrganizationNames?.length > 0 && (
+                          <p
+                            className="text-xs text-blue-500 mt-0.5"
+                            title={election.assignedOrganizationNames.join(", ")}
+                          >
+                            +{election.assignedOrganizationNames.length} assigned
+                          </p>
+                        )}
+                      </td>
                       <td className="py-3.5 px-4">
                         <ElectionStatusBadge election={election} />
                       </td>
@@ -457,14 +512,24 @@ export default function SuperAdminElectionsPage() {
                         </div>
                       </td>
                       <td className="py-3.5 px-4">
-                        <button
-                          onClick={() => openResetModal(election)}
-                          title="Reset all votes"
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100 transition-colors whitespace-nowrap"
-                        >
-                          <RotateCcw size={12} />
-                          Reset Votes
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => openAssignModal(election)}
+                            title="Assign to organizations"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-600 text-xs font-semibold hover:bg-blue-100 transition-colors whitespace-nowrap"
+                          >
+                            <Share2 size={12} />
+                            Assign
+                          </button>
+                          <button
+                            onClick={() => openResetModal(election)}
+                            title="Reset all votes"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100 transition-colors whitespace-nowrap"
+                          >
+                            <RotateCcw size={12} />
+                            Reset Votes
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {expandedId === election._id && (
@@ -639,6 +704,64 @@ export default function SuperAdminElectionsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {assignTarget && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="bg-[#d4af37] px-6 py-4 shrink-0">
+              <h2 className="text-lg font-bold text-white">Assign Organizations</h2>
+              <p className="text-blue-100 text-xs mt-0.5">{assignTarget.title}</p>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto">
+              <p className="text-sm text-gray-500">
+                Grant additional organizations full management access to this election
+                (voters, candidates, and results are shared with{" "}
+                <span className="font-semibold text-gray-700">{assignTarget.organizationName}</span>,
+                the owner).
+              </p>
+              <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-64 overflow-y-auto">
+                {organizations.filter((o) => o._id !== assignTarget.organizationId).length === 0 ? (
+                  <p className="text-sm text-gray-400 px-4 py-6 text-center">
+                    No other election-type organizations available.
+                  </p>
+                ) : (
+                  organizations
+                    .filter((o) => o._id !== assignTarget.organizationId)
+                    .map((org) => (
+                      <label
+                        key={org._id}
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={assignSelectedIds.has(org._id)}
+                          onChange={() => toggleAssignOrg(org._id)}
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-gray-700">{org.name}</span>
+                      </label>
+                    ))
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
+                <button
+                  onClick={() => setAssignTarget(null)}
+                  className="px-5 py-2.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitAssign}
+                  disabled={assigning}
+                  className="px-6 py-2.5 text-sm font-semibold bg-[#d4af37] text-white rounded-xl hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-60"
+                >
+                  {assigning ? "Saving…" : "Save Assignment"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

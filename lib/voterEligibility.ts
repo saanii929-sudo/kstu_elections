@@ -7,6 +7,11 @@ export interface EligibilityResult {
   status?: number;
   startDate?: Date;
   election?: InstanceType<typeof Election>;
+  // Machine-readable failure reason — lets callers branch on why (e.g. the
+  // voter login page redirecting to a thank-you page specifically for
+  // 'already_voted', rather than showing an error) without parsing the
+  // human-readable `error` text.
+  reason?: 'already_voted' | 'disabled' | 'not_started' | 'ended' | 'not_found';
 }
 
 /**
@@ -15,19 +20,37 @@ export interface EligibilityResult {
  */
 export async function checkVoterEligibility(voter: IVoter): Promise<EligibilityResult> {
   if (voter.status !== 'active') {
-    if (voter.status === 'expired') {
+    // 'expired' status is set both when a voter actually casts a ballot AND
+    // when their election simply ends without them voting — hasVoted is the
+    // one field that reliably tells these two apart. Getting this wrong
+    // would tell someone who never voted "you have already voted."
+    if (voter.hasVoted) {
       return {
         ok: false,
         error: 'Your voting credentials have expired. You have already voted.',
         status: 403,
+        reason: 'already_voted',
       };
     }
-    return { ok: false, error: 'Your voting access has been disabled', status: 403 };
+    if (voter.status === 'expired') {
+      return {
+        ok: false,
+        error: 'This election has ended. Your voting credentials are no longer valid.',
+        status: 403,
+        reason: 'ended',
+      };
+    }
+    return {
+      ok: false,
+      error: 'Your voting access has been disabled',
+      status: 403,
+      reason: 'disabled',
+    };
   }
 
   const election = await Election.findById(voter.electionId);
   if (!election) {
-    return { ok: false, error: 'Election not found', status: 404 };
+    return { ok: false, error: 'Election not found', status: 404, reason: 'not_found' };
   }
 
   const now = new Date();
@@ -40,6 +63,7 @@ export async function checkVoterEligibility(voter: IVoter): Promise<EligibilityR
       error: 'Voting has not started yet. Please wait until the election begins.',
       status: 403,
       startDate: election.startDate,
+      reason: 'not_started',
     };
   }
 
@@ -53,6 +77,7 @@ export async function checkVoterEligibility(voter: IVoter): Promise<EligibilityR
       ok: false,
       error: 'This election has ended. Your voting credentials are no longer valid.',
       status: 403,
+      reason: 'ended',
     };
   }
 

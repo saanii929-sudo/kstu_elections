@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { Download, TrendingUp, Users, Award, BarChart3, Grid3x3, Table2, RefreshCw, User, Clock, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Download, TrendingUp, Users, Award, BarChart3, Grid3x3, Table2, RefreshCw, User, Clock, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // Dynamic color palette for candidate differentiation
@@ -23,6 +23,9 @@ interface Candidate {
   name: string;
   image?: string;
   voteCount: number;
+  // Only meaningful when this candidate is the sole one in their category —
+  // explicit rejections on the YES/NO referendum ballot.
+  noVoteCount?: number;
   categoryId: { _id: string; name: string };
 }
 
@@ -238,6 +241,24 @@ export default function ResultsPage() {
     const rows = [
       'Position,Rank,Candidate,Votes,Percentage,Status',
       ...Object.entries(groupedCandidates).flatMap(([pos, cs]) => {
+        // Solo (referendum-style) position — export real Yes/No counts
+        // rather than treating the sole candidate as an uncontested race.
+        if (cs.length === 1) {
+          const solo = cs[0];
+          const yesCount = solo.voteCount;
+          const noCount = solo.noVoteCount || 0;
+          const decidedTotal = yesCount + noCount;
+          const yesPct = decidedTotal > 0 ? ((yesCount / decidedTotal) * 100).toFixed(2) : '0.00';
+          const noPct = decidedTotal > 0 ? ((noCount / decidedTotal) * 100).toFixed(2) : '0.00';
+          const isSoloTied = decidedTotal > 0 && yesCount === noCount;
+          const yesStatus = isSoloTied ? 'Tied' : electionEnded ? (yesCount > noCount ? 'Elected' : 'Not Elected') : 'Leading';
+          const noStatus = isSoloTied ? 'Tied' : electionEnded && noCount > yesCount ? 'Rejected' : '—';
+          return [
+            `"${pos}",1,"Yes — ${solo.name}",${yesCount},${yesPct}%,${yesStatus}`,
+            `"${pos}",2,"No — ${solo.name}",${noCount},${noPct}%,${noStatus}`,
+          ];
+        }
+
         const t = cs.reduce((s, c) => s + c.voteCount, 0);
         const { maxVotes, isTied } = getTieStatus(cs);
         return cs.map((c, i) => {
@@ -368,7 +389,7 @@ export default function ResultsPage() {
                   { label: 'Seconds', value: countdown.seconds },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex flex-col items-center gap-1.5">
-                    <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl border-2 border-[#d4af37] bg-green-100 flex items-center justify-center">
+                    <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl border-2 border-[#d4af37] bg-blue-200 flex items-center justify-center">
                       <span className="text-2xl sm:text-3xl font-bold text-[#d4af37] tabular-nums">{pad(value)}</span>
                     </div>
                     <span className="text-xs text-gray-500 font-medium">{label}</span>
@@ -433,13 +454,15 @@ export default function ResultsPage() {
                 const posTotal = positionCandidates.reduce((s, c) => s + c.voteCount, 0);
                 const { maxVotes, isTied, tiedCount } = getTieStatus(positionCandidates);
 
-                // ── Solo candidate: referendum-style breakdown ──────────────
+                // ── Solo candidate: referendum-style Yes/No breakdown ────────
                 if (positionCandidates.length === 1) {
                   const solo = positionCandidates[0];
-                  const votedPct = totalVoters > 0 ? (solo.voteCount / totalVoters) * 100 : 0;
-                  const notVotedCount = Math.max(0, totalVoters - solo.voteCount);
-                  const notVotedPct = totalVoters > 0 ? (notVotedCount / totalVoters) * 100 : 0;
-                  const isSoloTied = solo.voteCount > 0 && solo.voteCount === notVotedCount;
+                  const yesCount = solo.voteCount;
+                  const noCount = solo.noVoteCount || 0;
+                  const decidedTotal = yesCount + noCount;
+                  const yesPct = decidedTotal > 0 ? (yesCount / decidedTotal) * 100 : 0;
+                  const noPct = decidedTotal > 0 ? (noCount / decidedTotal) * 100 : 0;
+                  const isSoloTied = decidedTotal > 0 && yesCount === noCount;
                   return (
                     <div key={positionName} className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
                       <div className="px-6 py-4 flex items-center justify-between">
@@ -467,51 +490,59 @@ export default function ResultsPage() {
                               {isSoloTied
                                 ? <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-lg font-bold bg-amber-100 text-amber-700"><Award size={14} /> Tied</span>
                                 : electionEnded
-                                  ? solo.voteCount > 0
-                                    ? <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-lg font-bold bg-[#d4af37] text-white"><Award size={14} /> Elected</span>
-                                    : <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-gray-200 text-gray-600">No Votes Cast</span>
+                                  ? decidedTotal === 0
+                                    ? <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-gray-200 text-gray-600">No Votes Cast</span>
+                                    : yesCount > noCount
+                                      ? <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-lg font-bold bg-[#d4af37] text-white"><Award size={14} /> Elected</span>
+                                      : <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-lg font-bold bg-red-100 text-red-700"><XCircle size={14} /> Rejected</span>
                                   : <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-lg font-bold bg-blue-100 text-blue-700"><CheckCircle size={14} /> Polling in Progress</span>
                               }
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="text-5xl font-extrabold text-gray-900">{solo.voteCount.toLocaleString()}</p>
+                            <p className="text-5xl font-extrabold text-gray-900">{decidedTotal.toLocaleString()}</p>
                             <p className="text-lg text-gray-400 mt-0.5">votes cast</p>
                           </div>
                         </div>
                         {/* Split bar */}
                         <div className="flex items-center justify-between text-lg font-bold mb-2">
-                          <span className="text-[#d4af37] text-xl">Voted — {votedPct.toFixed(1)}%</span>
-                          <span className="text-gray-400 text-xl">Did Not Vote — {notVotedPct.toFixed(1)}%</span>
+                          <span className="text-[#d4af37] text-xl">Yes — {yesPct.toFixed(1)}%</span>
+                          <span className="text-red-500 text-xl">No — {noPct.toFixed(1)}%</span>
                         </div>
-                        <div className="flex h-12 w-xl rounded-2xl overflow-hidden mb-5 bg-gray-100">
+                        <div className="flex h-12 w-xl rounded-2xl overflow-hidden mb-2 bg-gray-100">
                           <div
                             className="bg-[#d4af37] flex items-center justify-center transition-all duration-700"
-                            style={{ width: `${votedPct}%`, minWidth: votedPct > 0 ? '2px' : '0' }}
+                            style={{ width: `${yesPct}%`, minWidth: yesPct > 0 ? '2px' : '0' }}
                           >
-                            {votedPct >= 14 && <span className="text-white text-lg font-bold">{votedPct.toFixed(1)}%</span>}
+                            {yesPct >= 14 && <span className="text-white text-lg font-bold">{yesPct.toFixed(1)}%</span>}
                           </div>
-                          <div className="flex-1 flex items-center justify-center">
-                            {notVotedPct >= 14 && <span className="text-gray-400 text-lg font-bold">{notVotedPct.toFixed(1)}%</span>}
+                          <div
+                            className="bg-red-400 flex items-center justify-center transition-all duration-700"
+                            style={{ width: `${noPct}%`, minWidth: noPct > 0 ? '2px' : '0' }}
+                          >
+                            {noPct >= 14 && <span className="text-white text-lg font-bold">{noPct.toFixed(1)}%</span>}
                           </div>
                         </div>
+                        <p className="text-sm text-gray-400 mb-5">
+                          {decidedTotal.toLocaleString()} of {totalVoters.toLocaleString()} registered voter{totalVoters !== 1 ? 's' : ''} decided on this position
+                        </p>
                         {/* Stat cards */}
                         <div className="grid grid-cols-2 gap-3">
                           <div className="rounded-xl p-4 bg-green-50 border border-green-100">
                             <div className="flex items-center gap-2 mb-2">
                               <div className="w-6 h-6 rounded-full bg-[#d4af37] shrink-0" />
-                              <p className="text-lg font-bold text-[#d4af37] uppercase tracking-wider">Voted</p>
+                              <p className="text-lg font-bold text-[#d4af37] uppercase tracking-wider">Yes</p>
                             </div>
-                            <p className="text-4xl font-extrabold text-gray-900 leading-none">{solo.voteCount.toLocaleString()}</p>
-                            <p className="text-xl text-green-600 font-semibold mt-1">{votedPct.toFixed(1)}% of voters</p>
+                            <p className="text-4xl font-extrabold text-gray-900 leading-none">{yesCount.toLocaleString()}</p>
+                            <p className="text-xl text-green-600 font-semibold mt-1">{yesPct.toFixed(1)}% of votes cast</p>
                           </div>
-                          <div className="rounded-xl p-4 bg-gray-50 border border-gray-100">
+                          <div className="rounded-xl p-4 bg-red-50 border border-red-100">
                             <div className="flex items-center gap-2 mb-2">
-                              <div className="w-6 h-6 rounded-full bg-gray-400 shrink-0" />
-                              <p className="text-lg font-bold text-gray-500 uppercase tracking-wider">Did Not Vote</p>
+                              <div className="w-6 h-6 rounded-full bg-red-400 shrink-0" />
+                              <p className="text-lg font-bold text-red-600 uppercase tracking-wider">No</p>
                             </div>
-                            <p className="text-4xl font-extrabold text-gray-900 leading-none">{notVotedCount.toLocaleString()}</p>
-                            <p className="text-xl text-gray-500 font-semibold mt-1">{notVotedPct.toFixed(1)}% of voters</p>
+                            <p className="text-4xl font-extrabold text-gray-900 leading-none">{noCount.toLocaleString()}</p>
+                            <p className="text-xl text-red-500 font-semibold mt-1">{noPct.toFixed(1)}% of votes cast</p>
                           </div>
                         </div>
                       </div>
@@ -624,13 +655,15 @@ export default function ResultsPage() {
                 const posTotal = positionCandidates.reduce((s, c) => s + c.voteCount, 0);
                 const { maxVotes, isTied, tiedCount } = getTieStatus(positionCandidates);
 
-                // ── Solo candidate: referendum-style breakdown ──────────────
+                // ── Solo candidate: referendum-style Yes/No breakdown ────────
                 if (positionCandidates.length === 1) {
                   const solo = positionCandidates[0];
-                  const votedPct = totalVoters > 0 ? (solo.voteCount / totalVoters) * 100 : 0;
-                  const notVotedCount = Math.max(0, totalVoters - solo.voteCount);
-                  const notVotedPct = totalVoters > 0 ? (notVotedCount / totalVoters) * 100 : 0;
-                  const isSoloTied = solo.voteCount > 0 && solo.voteCount === notVotedCount;
+                  const yesCount = solo.voteCount;
+                  const noCount = solo.noVoteCount || 0;
+                  const decidedTotal = yesCount + noCount;
+                  const yesPct = decidedTotal > 0 ? (yesCount / decidedTotal) * 100 : 0;
+                  const noPct = decidedTotal > 0 ? (noCount / decidedTotal) * 100 : 0;
+                  const isSoloTied = decidedTotal > 0 && yesCount === noCount;
                   return (
                     <div key={positionName} className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
                       <div className="px-6 py-4 flex items-center justify-between">
@@ -647,12 +680,12 @@ export default function ResultsPage() {
                             <tr className="bg-gray-50 border-b border-gray-100">
                               <th className="text-left py-3 px-6 text-xs font-semibold text-gray-400 uppercase tracking-wide">Candidate</th>
                               <th className="text-right py-3 px-6 text-xs font-semibold text-gray-400 uppercase tracking-wide">Count</th>
-                              <th className="text-left py-3 px-6 text-xs font-semibold text-gray-400 uppercase tracking-wide w-56">Share of Registered Voters</th>
+                              <th className="text-left py-3 px-6 text-xs font-semibold text-gray-400 uppercase tracking-wide w-56">Share of Votes Cast</th>
                               <th className="text-left py-3 px-6 text-xs font-semibold text-gray-400 uppercase tracking-wide">Status</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {/* Voted row */}
+                            {/* Yes row */}
                             <tr className={`border-b border-gray-100 ${isSoloTied ? 'bg-amber-50' : 'bg-green-50'}`}>
                               <td className="py-4 px-6">
                                 <div className="flex items-center gap-3">
@@ -664,64 +697,64 @@ export default function ResultsPage() {
                                     </div>
                                   )}
                                   <div>
-                                    <p className="font-bold text-xl text-gray-900">{solo.name}</p>
+                                    <p className="font-bold text-xl text-gray-900">Yes — {solo.name}</p>
                                     <p className="text-sm text-gray-400 mt-0.5">Voted for this candidate</p>
                                   </div>
                                 </div>
                               </td>
                               <td className="py-4 px-6 text-right">
-                                <p className="text-xl font-bold text-gray-900">{solo.voteCount.toLocaleString()}</p>
+                                <p className="text-xl font-bold text-gray-900">{yesCount.toLocaleString()}</p>
                               </td>
                               <td className="py-4 px-6">
                                 <div className="flex items-center gap-2">
                                   <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
-                                    <div className="h-full rounded-full bg-[#d4af37] transition-all duration-700" style={{ width: `${votedPct}%` }} />
+                                    <div className="h-full rounded-full bg-[#d4af37] transition-all duration-700" style={{ width: `${yesPct}%` }} />
                                   </div>
-                                  <span className="text-lg font-semibold text-[#d4af37] w-12 text-right">{votedPct.toFixed(1)}%</span>
+                                  <span className="text-lg font-semibold text-[#d4af37] w-12 text-right">{yesPct.toFixed(1)}%</span>
                                 </div>
                               </td>
                               <td className="py-4 px-6">
-                                {isSoloTied
-                                  ? <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-lg font-bold bg-amber-100 text-amber-700"><Award size={22} /> Tied</span>
-                                  : electionEnded
-                                    ? solo.voteCount > 0
-                                      ? <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-lg font-bold bg-[#d4af37] text-white"><Award size={22} /> Elected</span>
-                                      : <span className="inline-flex items-center px-2.5 py-1 rounded-full text-lg font-bold bg-gray-200 text-gray-600">No Votes Cast</span>
-                                    : <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-lg font-bold bg-green-100 text-[#d4af37]"><CheckCircle size={22} /> Leading</span>
-                                }
+                                
                               </td>
                             </tr>
-                            {/* Did not vote row */}
+                            {/* No row */}
                             <tr className="hover:bg-gray-50/60">
                               <td className="py-4 px-6">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-22 h-22 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
-                                    <Users className="text-gray-400" size={22} />
+                                  <div className="w-22 h-22 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+                                    <XCircle className="text-red-400" size={22} />
                                   </div>
                                   <div>
-                                    <p className="font-semibold text-2xl text-gray-500 italic">Did Not Vote</p>
-                                    <p className="text-sm text-gray-400 mt-0.5">Registered voters who abstained</p>
+                                    <p className="font-bold text-xl text-gray-900">No — {solo.name}</p>
+                                    <p className="text-sm text-gray-400 mt-0.5">Voted against this candidate</p>
                                   </div>
                                 </div>
                               </td>
                               <td className="py-4 px-6 text-right">
-                                <p className="text-xl font-bold text-gray-600">{notVotedCount.toLocaleString()}</p>
+                                <p className="text-xl font-bold text-gray-900">{noCount.toLocaleString()}</p>
                               </td>
                               <td className="py-4 px-6">
                                 <div className="flex items-center gap-2">
                                   <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
-                                    <div className="h-full rounded-full bg-gray-400 transition-all duration-700" style={{ width: `${notVotedPct}%` }} />
+                                    <div className="h-full rounded-full bg-red-400 transition-all duration-700" style={{ width: `${noPct}%` }} />
                                   </div>
-                                  <span className="text-lg font-bold text-gray-500 w-12 text-right">{notVotedPct.toFixed(1)}%</span>
+                                  <span className="text-lg font-bold text-red-500 w-12 text-right">{noPct.toFixed(1)}%</span>
                                 </div>
                               </td>
                               <td className="py-4 px-6">
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-lg font-medium bg-gray-100 text-gray-500">Abstained</span>
+                                {!isSoloTied && electionEnded && decidedTotal > 0 && noCount > yesCount ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-lg font-bold bg-red-100 text-red-700"><XCircle size={22} /> Rejected</span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-lg font-medium bg-gray-100 text-gray-500">—</span>
+                                )}
                               </td>
                             </tr>
                           </tbody>
                         </table>
                       </div>
+                      <p className="px-6 pb-4 text-sm text-gray-400">
+                        {decidedTotal.toLocaleString()} of {totalVoters.toLocaleString()} registered voter{totalVoters !== 1 ? 's' : ''} decided on this position
+                      </p>
                     </div>
                   );
                 }

@@ -136,26 +136,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Sending is always scheduled, never immediate — one date/time applies
-    // to the whole batch (see lib/scheduledVoterCredentials.ts).
-    if (!credentialsSendAt) {
-      return NextResponse.json(
-        { error: 'A credentials send date/time is required' },
-        { status: 400 }
-      );
-    }
-    const sendAt = new Date(credentialsSendAt);
-    if (isNaN(sendAt.getTime()) || sendAt <= now) {
-      return NextResponse.json(
-        { error: 'Credentials send date/time must be in the future' },
-        { status: 400 }
-      );
-    }
-    if (sendAt > endDate) {
-      return NextResponse.json(
-        { error: 'Credentials send date/time must be before the election ends' },
-        { status: 400 }
-      );
+    // Scheduling now happens as a separate step (PATCH /api/elections/voters/reschedule
+    // scoped to this batch's importBatchId) after the admin has reviewed which rows
+    // actually got stored — so credentialsSendAt here is optional. If it IS given
+    // (kept for backward compatibility with any other caller), validate and apply
+    // it immediately; otherwise voters are created unscheduled (credentialsSent:
+    // false, credentialsSendAt unset) and simply won't be picked up by the sender
+    // until scheduled.
+    let sendAt: Date | undefined;
+    if (credentialsSendAt) {
+      sendAt = new Date(credentialsSendAt);
+      if (isNaN(sendAt.getTime()) || sendAt <= now) {
+        return NextResponse.json(
+          { error: 'Credentials send date/time must be in the future' },
+          { status: 400 }
+        );
+      }
+      if (sendAt > endDate) {
+        return NextResponse.json(
+          { error: 'Credentials send date/time must be before the election ends' },
+          { status: 400 }
+        );
+      }
     }
 
     const existingVoters = await Voter.find({ electionId }, { email: 1, phone: 1, voterId: 1 }).lean();
@@ -367,7 +369,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Successfully added ${results.success.length} voters. Credentials will be sent on ${sendAt.toLocaleString()}.`,
+      message: sendAt
+        ? `Successfully added ${results.success.length} voters. Credentials will be sent on ${sendAt.toLocaleString()}.`
+        : `Successfully added ${results.success.length} voters. ${results.failed.length} row(s) could not be stored — review and schedule when ready.`,
       data: {
         total: voters.length,
         successful: results.success.length,

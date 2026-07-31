@@ -114,10 +114,17 @@ export async function POST(req: NextRequest) {
     }
 
     const votesToSave = [];
-    const candidateUpdates = [];
+    // Separate lists rather than one counter per candidate — a yes and a no
+    // increment different fields on the same candidate document.
+    const yesUpdates = [];
+    const noUpdates = [];
 
     for (const vote of votes) {
       const { categoryId, candidateId } = vote;
+      // Anything other than the literal string 'no' is treated as a normal
+      // yes/vote-for — this keeps every pre-existing client payload (which
+      // never sent voteType at all) working unchanged.
+      const voteType: 'yes' | 'no' = vote.voteType === 'no' ? 'no' : 'yes';
 
       const candidate = await Candidate.findOne({
         _id: candidateId,
@@ -136,17 +143,44 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // A "no" is only a meaningful, valid choice on a referendum-style
+      // ballot — i.e. this candidate is the only one running for this
+      // position. Reject anything claiming "no" against a contested race,
+      // since the client should never be able to produce that combination
+      // through the normal ballot UI.
+      if (voteType === 'no') {
+        const candidateCountInCategory = await Candidate.countDocuments({
+          categoryId,
+          electionId: voter.electionId,
+        });
+        if (candidateCountInCategory !== 1) {
+          await Voter.findByIdAndUpdate(voter._id, {
+            $set: { hasVoted: false, status: 'active' },
+            $unset: { votedAt: 1 },
+          });
+          return NextResponse.json(
+            { error: 'Invalid vote data' },
+            { status: 400 }
+          );
+        }
+      }
+
       votesToSave.push({
         electionId: voter.electionId,
         voterId: voter._id,
         categoryId,
         candidateId,
+        voteType,
         organizationId: voter.organizationId,
         voterToken: voter.token,
         voterIp: ip,
       });
 
-      candidateUpdates.push(candidateId);
+      if (voteType === 'no') {
+        noUpdates.push(candidateId);
+      } else {
+        yesUpdates.push(candidateId);
+      }
     }
 
     await ElectionVote.deleteMany({ voterId: voter._id, electionId: voter.electionId });
@@ -162,11 +196,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Update candidate vote counts
-    await Promise.all(
-      candidateUpdates.map(candidateId =>
+    await Promise.all([
+      ...yesUpdates.map(candidateId =>
         Candidate.findByIdAndUpdate(candidateId, { $inc: { voteCount: 1 } })
-      )
-    );
+      ),
+      ...noUpdates.map(candidateId =>
+        Candidate.findByIdAndUpdate(candidateId, { $inc: { noVoteCount: 1 } })
+      ),
+    ]);
     // hasVoted / status / votedAt were already set atomically above
 
     return NextResponse.json({

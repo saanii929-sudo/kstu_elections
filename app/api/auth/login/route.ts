@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Admin from '@/models/Admin';
 import Organization from '@/models/Organization';
+import Election from '@/models/Election';
 import OrganizationAdmin from '@/models/OrganizationAdmin';
 import EventOrganizer from '@/models/EventOrganizer';
 import { verifyPassword, generateToken } from '@/lib/auth';
@@ -127,6 +128,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // An election-type organization may be co-assigned (by a superadmin) to
+    // manage elections it doesn't own, on top of its own — mirrors the
+    // electionAdmin.assignedElections pattern above. Looked up fresh at
+    // login (not stored on the Organization doc) since it's derived from
+    // Election.assignedOrganizationIds, which a superadmin can change at
+    // any time; the org just needs to log in again to pick up a change.
+    const orgAssignedElectionIds = (role === 'organization' && (user as any).eventType === 'election')
+      ? (await Election.find({ assignedOrganizationIds: user._id }).select('_id')).map((e) => e._id.toString())
+      : undefined;
+
     const tokenPayload = {
       id: user._id,
       email: user.email,
@@ -137,7 +148,7 @@ export async function POST(req: NextRequest) {
       assignedAwards: role === 'org-admin' ? primaryAssignedAwards : undefined,
       assignedElections: role === 'electionAdmin'
         ? ((user as any).assignedElections || []).map((e: any) => e.toString())
-        : undefined,
+        : orgAssignedElectionIds,
     };
 
     const userResponse = {
@@ -153,7 +164,7 @@ export async function POST(req: NextRequest) {
       organizations: role === 'org-admin' ? allOrgs : undefined,
       assignedElections: role === 'electionAdmin'
         ? ((user as any).assignedElections || []).map((e: any) => e.toString())
-        : undefined,
+        : orgAssignedElectionIds,
     };
 
     // Admin-model accounts (superadmin/electionAdmin) with a phone on file

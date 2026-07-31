@@ -3,9 +3,12 @@ import Election, { IElection } from '@/models/Election';
 
 // Shared authorization logic for the two identities that can manage an
 // election: the owning Organization (full access to every election it
-// owns), and an electionAdmin (an Admin account scoped to specific
-// elections via decoded.assignedElections). Centralized here so the many
-// app/api/elections/** routes don't each re-derive this independently.
+// owns, plus any election a superadmin has co-assigned it to via
+// Election.assignedOrganizationIds — carried in decoded.assignedElections,
+// same mechanism as electionAdmin below), and an electionAdmin (an Admin
+// account scoped to specific elections via decoded.assignedElections).
+// Centralized here so the many app/api/elections/** routes don't each
+// re-derive this independently.
 export interface DecodedElectionActor {
   id: string;
   role: string;
@@ -29,6 +32,9 @@ export async function getAccessibleElection(
   electionId: string
 ): Promise<IElection | null> {
   if (decoded.role === 'organization') {
+    if (assignedIds(decoded).includes(String(electionId))) {
+      return Election.findById(electionId);
+    }
     return Election.findOne({ _id: electionId, organizationId: decoded.id });
   }
   if (decoded.role === 'electionAdmin') {
@@ -45,7 +51,15 @@ export async function getAccessibleElection(
  *   Candidate.findOne({ _id: id, ...electionOwnerMatch(decoded) })
  */
 export function electionOwnerMatch(decoded: DecodedElectionActor): Record<string, unknown> {
-  if (decoded.role === 'organization') return { organizationId: decoded.id };
+  if (decoded.role === 'organization') {
+    const assigned = assignedIds(decoded);
+    // Sub-resources always carry the owning organization's id (set once at
+    // creation, never rewritten for co-assigned orgs — see bulk voter
+    // upload). A co-assigned org therefore can't match on organizationId,
+    // only on electionId membership.
+    if (assigned.length === 0) return { organizationId: decoded.id };
+    return { $or: [{ organizationId: decoded.id }, { electionId: { $in: assigned } }] };
+  }
   if (decoded.role === 'electionAdmin') return { electionId: { $in: assignedIds(decoded) } };
   return { _id: null }; // matches nothing
 }
@@ -56,7 +70,12 @@ export function electionOwnerMatch(decoded: DecodedElectionActor): Record<string
  */
 export function electionListMatch(decoded: DecodedElectionActor): Record<string, unknown> {
   if (decoded.role === 'organization') {
-    return { organizationId: new mongoose.Types.ObjectId(decoded.id) };
+    const ownId = new mongoose.Types.ObjectId(decoded.id);
+    const assigned = assignedIds(decoded)
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+    if (assigned.length === 0) return { organizationId: ownId };
+    return { $or: [{ organizationId: ownId }, { _id: { $in: assigned } }] };
   }
   if (decoded.role === 'electionAdmin') {
     const ids = assignedIds(decoded)

@@ -218,6 +218,10 @@ function VoterLoginPageInner() {
         if (response.ok && data.success) {
           setVoterFirstName(data.data?.name || "");
           setStatus("login-form");
+        } else if (data.reason === "already_voted") {
+          // Not an error at all — show the thank-you page, not a red alert
+          // card, for what's actually a happy outcome.
+          router.replace("/election/thank-you");
         } else if (data.startDate) {
           setVotingStartDate(data.startDate);
           setStatus("not-started");
@@ -270,6 +274,9 @@ function VoterLoginPageInner() {
       if (response.ok && data.success) {
         toast.dismiss(loadingToast);
         await proceedAfterLogin(data.data);
+      } else if (data.reason === "already_voted") {
+        toast.dismiss(loadingToast);
+        router.replace("/election/thank-you");
       } else {
         toast.error(data.error || "Invalid credentials", {
           id: loadingToast,

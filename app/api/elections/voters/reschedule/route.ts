@@ -5,12 +5,14 @@ import { verifyToken } from '@/lib/auth';
 import { isElectionManager, getAccessibleElection } from '@/lib/electionAccess';
 import { logAudit } from '@/lib/auditLog';
 
-// Bulk-reschedules every not-yet-sent voter in an election to a new
-// credentialsSendAt — e.g. the admin picked a bad time and wants to push it
-// back, or move it up. Only touches voters with credentialsSent: false;
-// anyone whose credentials already went out is untouched (their real
-// password/link were already generated and delivered — rescheduling
-// wouldn't do anything meaningful for them).
+// Bulk-reschedules not-yet-sent voters to a new credentialsSendAt — either
+// every pending voter in the election (no batchId), or just one bulk-upload
+// batch (batchId given — this is what the bulk-upload wizard's "Schedule"
+// step calls once the admin has reviewed which rows actually got stored).
+// Only touches voters with credentialsSent: false; anyone whose credentials
+// already went out is untouched (their real password/link were already
+// generated and delivered — rescheduling wouldn't do anything meaningful
+// for them).
 export async function PATCH(req: NextRequest) {
   try {
     await connectDB();
@@ -26,7 +28,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { electionId, credentialsSendAt } = body;
+    const { electionId, credentialsSendAt, batchId } = body;
 
     if (!electionId || !credentialsSendAt) {
       return NextResponse.json(
@@ -57,24 +59,28 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    const result = await Voter.updateMany(
-      { electionId, credentialsSent: false },
-      { $set: { credentialsSendAt: sendAt } }
-    );
+    const filter: Record<string, unknown> = { electionId, credentialsSent: false };
+    if (batchId) filter.importBatchId = batchId;
+
+    const result = await Voter.updateMany(filter, { $set: { credentialsSendAt: sendAt } });
 
     if (result.modifiedCount === 0) {
       return NextResponse.json(
-        { error: 'No pending voters to reschedule — everyone in this election already has credentials sent.' },
+        {
+          error: batchId
+            ? 'No pending voters found in this batch to schedule.'
+            : 'No pending voters to reschedule — everyone in this election already has credentials sent.',
+        },
         { status: 400 }
       );
     }
 
     await logAudit({
       actor: { id: decoded.id, email: decoded.email, role: decoded.role },
-      action: 'voters.reschedule',
+      action: batchId ? 'voters.schedule_batch' : 'voters.reschedule',
       targetType: 'Election',
       targetId: String(electionId),
-      details: { credentialsSendAt: sendAt, rescheduled: result.modifiedCount },
+      details: { credentialsSendAt: sendAt, rescheduled: result.modifiedCount, batchId },
     });
 
     return NextResponse.json({

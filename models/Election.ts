@@ -2,6 +2,10 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IElection extends Document {
   organizationId: mongoose.Types.ObjectId;
+  // Additional organizations (beyond the owner) a superadmin has granted
+  // full co-management access to — same election, candidates, voters, and
+  // results shared across all of them. See lib/electionAccess.ts.
+  assignedOrganizationIds: mongoose.Types.ObjectId[];
   title: string;
   alias: string;
   description: string;
@@ -33,6 +37,7 @@ const ElectionSchema: Schema = new Schema(
       ref: 'Organization',
       required: true,
     },
+    assignedOrganizationIds: [{ type: Schema.Types.ObjectId, ref: 'Organization' }],
     title: {
       type: String,
       required: [true, 'Election title is required'],
