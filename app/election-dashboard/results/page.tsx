@@ -217,7 +217,13 @@ export default function ResultsPage() {
   const electionActive = electionStatusKey === "live";
   const electionUpcoming = electionStatusKey === "scheduled";
 
-  const countdownTarget = currentElection ? currentElection.endDate : null;
+  // Counts down to whichever boundary is next — startDate while upcoming,
+  // endDate while live — not always endDate (which produced a confusing
+  // number, e.g. "opens in 45 days" while actually counting down to the
+  // election's end).
+  const countdownTarget = currentElection
+    ? electionUpcoming ? currentElection.startDate : electionActive ? currentElection.endDate : null
+    : null;
   const countdown = useCountdown(countdownTarget);
   const pad = (n: number) => String(n).padStart(2, "0");
 

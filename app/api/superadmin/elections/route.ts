@@ -6,7 +6,7 @@ import Voter from '@/models/Voter';
 import ElectionVote from '@/models/ElectionVote';
 import Organization from '@/models/Organization';
 import { withAuth } from '@/middleware/auth';
-import { normalizeAlias, isValidAlias } from '@/lib/electionStatus';
+import { normalizeAlias, isValidAlias, getElectionStatus } from '@/lib/electionStatus';
 import { logAudit } from '@/lib/auditLog';
 
 async function getAllElections(req: NextRequest) {
@@ -86,10 +86,16 @@ async function getAllElections(req: NextRequest) {
       { $sort: { createdAt: -1 } },
     ]);
 
-    const total = elections.length;
+    // Computed once here with the server's own clock and stamped onto each
+    // election as displayStatus — the client trusts this instead of
+    // recomputing from its own (possibly wrong) device clock. See
+    // lib/electionStatus.ts.
+    const withStatus = elections.map((e: any) => ({ ...e, displayStatus: getElectionStatus(e) }));
+
+    const total = withStatus.length;
     const totalPages = limit ? Math.max(1, Math.ceil(total / limit)) : 1;
     const start = limit ? (page - 1) * limit : 0;
-    const paged = limit ? elections.slice(start, start + limit) : elections;
+    const paged = limit ? withStatus.slice(start, start + limit) : withStatus;
 
     return NextResponse.json({
       success: true,

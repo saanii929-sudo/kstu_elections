@@ -4,6 +4,14 @@ export interface ElectionLike {
   status: string;
   startDate: string | Date;
   endDate: string | Date;
+  // Server-computed status (see app/api/elections/route.ts and
+  // app/api/superadmin/elections/route.ts) — when present, this is trusted
+  // over recomputing from the caller's own device clock. This function runs
+  // in the browser on every dashboard page, and a device's system clock
+  // can't be relied on to agree with the server's — a skewed client clock
+  // would otherwise show "Not Started"/"Ended" for elections that are
+  // genuinely live, inconsistently across machines.
+  displayStatus?: ElectionStatusKey;
 }
 
 export interface ElectionStatusInfo {
@@ -20,6 +28,8 @@ export interface ElectionStatusInfo {
  * actually do. Stored `status` only matters for early termination ("ended").
  */
 export function getElectionStatus(election: ElectionLike): ElectionStatusKey {
+  if (election.displayStatus) return election.displayStatus;
+
   const now = new Date();
   const start = new Date(election.startDate);
   const end = new Date(election.endDate);

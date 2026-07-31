@@ -101,17 +101,21 @@ export async function GET(req: NextRequest) {
       { $project: { organization: 0, candidates: 0, voters: 0, votes: 0 } },
     ]);
 
-    // Status is schedule-derived, so filtering/sorting on it happens in JS
-    // using the same getElectionStatus() the UI uses — keeps both in lockstep.
-    let filtered = elections;
+    // Status is schedule-derived — computed once here with the server's own
+    // clock and stamped onto each election as displayStatus, which the
+    // client then trusts instead of recomputing from its own (possibly
+    // wrong) device clock. See lib/electionStatus.ts.
+    const withStatus = elections.map((e: any) => ({ ...e, displayStatus: getElectionStatus(e) }));
+
+    let filtered = withStatus;
     if (statusFilter && statusFilter !== 'all') {
-      filtered = filtered.filter((e) => getElectionStatus(e) === statusFilter);
+      filtered = filtered.filter((e) => e.displayStatus === statusFilter);
     }
 
     filtered.sort((a, b) => {
       let diff = 0;
       if (sortBy === 'status') {
-        diff = STATUS_SORT_ORDER[getElectionStatus(a)] - STATUS_SORT_ORDER[getElectionStatus(b)];
+        diff = STATUS_SORT_ORDER[a.displayStatus as ElectionStatusKey] - STATUS_SORT_ORDER[b.displayStatus as ElectionStatusKey];
       } else if (sortBy === 'createdDate') {
         diff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       } else {
