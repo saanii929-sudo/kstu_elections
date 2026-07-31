@@ -311,7 +311,6 @@ export default function ResultsPage() {
     groupedCandidates[pos].sort((a, b) => b.voteCount - a.voteCount);
   });
 
-  const totalVotes = candidates.reduce((s, c) => s + c.voteCount, 0);
   const totalVoters = voters.length;
   const votedCount = voters.filter((v) => v.hasVoted).length;
   const turnoutRate =
@@ -569,7 +568,7 @@ export default function ResultsPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <StatCard
               label="Total Votes Cast"
-              value={totalVotes}
+              value={votedCount}
               icon={BarChart3}
             />
             <StatCard
