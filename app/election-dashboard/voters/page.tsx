@@ -1670,7 +1670,7 @@ export default function VotersPage() {
                         <button
                           onClick={undoBulkUpload}
                           disabled={undoingBatch || !uploadResults.batchId}
-                          className="shrink-0 px-4 py-2  text-yellow-800 text-sm font-medium rounded-lg cursor-pointer border-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="shrink-0 px-4 py-2  text-yellow-800 text-sm font-medium rounded-lg cursor-pointer border disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {undoingBatch ? "Undoing…" : "Undo This Upload"}
                         </button>
