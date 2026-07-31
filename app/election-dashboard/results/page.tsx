@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Download, TrendingUp, Users, Award, BarChart3, Grid3x3, Table2, RefreshCw, User, Clock, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getElectionStatus } from '@/lib/electionStatus';
 
 // Dynamic color palette for candidate differentiation
 const CANDIDATE_COLORS = [
@@ -119,13 +120,13 @@ function StatCard({ label, value, icon: Icon, sub }: { label: string; value: str
   return (
     <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
       <div className="flex items-start justify-between mb-3">
-        <div className="w-14 h-14 bg-green-50 rounded-lg flex items-center justify-center">
-          <Icon className="text-[#d4af37]" size={26} />
+        <div className="w-14 h-14 bg-blue-50 rounded-lg flex items-center justify-center">
+          <Icon className="text-blue-600" size={26} />
         </div>
       </div>
-      <p className="text-3xl font-bold text-gray-900">{value}</p>
+      <p className="text-3xl font-bold text-blue-600">{value}</p>
       <p className="text-lg text-gray-500 mt-0.5">{label}</p>
-      {sub && <p className="text-sm font-semibold text-[#d4af37] mt-1">{sub}</p>}
+      {sub && <p className="text-sm font-semibold text-blue-600 mt-1">{sub}</p>}
     </div>
   );
 }
@@ -151,16 +152,13 @@ export default function ResultsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
   const currentElection = elections.find(e => e._id === selectedElection) || null;
-  const now = new Date();
-  const electionEnded = currentElection
-    ? currentElection.status === 'ended' || new Date(currentElection.endDate) < now
-    : false;
-  const electionActive = currentElection
-    ? currentElection.status === 'active' && new Date(currentElection.endDate) >= now
-    : false;
-  const electionUpcoming = currentElection
-    ? currentElection.status === 'draft' || new Date(currentElection.startDate) > now
-    : false;
+  // Purely date-driven, same rule voting eligibility and the rest of the
+  // dashboard already use (see lib/electionStatus.ts) — status labels here
+  // never disagree with what voters can actually do.
+  const electionStatusKey = currentElection ? getElectionStatus(currentElection) : null;
+  const electionEnded = electionStatusKey === 'closed';
+  const electionActive = electionStatusKey === 'live';
+  const electionUpcoming = electionStatusKey === 'scheduled';
 
   const countdownTarget = currentElection ? currentElection.endDate : null;
   const countdown = useCountdown(countdownTarget);
@@ -349,6 +347,30 @@ export default function ResultsPage() {
           >
             <Download size={16} /> Export CSV
           </button>
+
+          {/* Election status */}
+          {electionStatusKey && (
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold whitespace-nowrap ${
+                electionStatusKey === 'closed'
+                  ? 'bg-red-100 text-red-700'
+                  : electionStatusKey === 'live'
+                  ? 'bg-blue-100 text-blue-700'
+                  : 'bg-[#d4af37] text-white'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  electionStatusKey === 'closed'
+                    ? 'bg-red-500'
+                    : electionStatusKey === 'live'
+                    ? 'bg-blue-500 animate-pulse'
+                    : 'bg-white'
+                }`}
+              />
+              {electionStatusKey === 'closed' ? 'Ended' : electionStatusKey === 'live' ? 'Ongoing' : 'Not Started'}
+            </span>
+          )}
         </div>
       </div>
 
