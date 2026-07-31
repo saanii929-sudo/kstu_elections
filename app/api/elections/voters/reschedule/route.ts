@@ -28,13 +28,16 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { electionId, credentialsSendAt, batchId } = body;
+    const { electionId, credentialsSendAt, batchId, deliveryMethod } = body;
 
     if (!electionId || !credentialsSendAt) {
       return NextResponse.json(
         { error: 'Election ID and a new send date/time are required' },
         { status: 400 }
       );
+    }
+    if (deliveryMethod && !['email', 'sms', 'both'].includes(deliveryMethod)) {
+      return NextResponse.json({ error: 'Invalid delivery method' }, { status: 400 });
     }
 
     const election = await getAccessibleElection(decoded, electionId);
@@ -62,7 +65,10 @@ export async function PATCH(req: NextRequest) {
     const filter: Record<string, unknown> = { electionId, credentialsSent: false };
     if (batchId) filter.importBatchId = batchId;
 
-    const result = await Voter.updateMany(filter, { $set: { credentialsSendAt: sendAt } });
+    const update: Record<string, unknown> = { credentialsSendAt: sendAt };
+    if (deliveryMethod) update.credentialsDeliveryMethod = deliveryMethod;
+
+    const result = await Voter.updateMany(filter, { $set: update });
 
     if (result.modifiedCount === 0) {
       return NextResponse.json(
@@ -80,7 +86,7 @@ export async function PATCH(req: NextRequest) {
       action: batchId ? 'voters.schedule_batch' : 'voters.reschedule',
       targetType: 'Election',
       targetId: String(electionId),
-      details: { credentialsSendAt: sendAt, rescheduled: result.modifiedCount, batchId },
+      details: { credentialsSendAt: sendAt, rescheduled: result.modifiedCount, batchId, deliveryMethod },
     });
 
     return NextResponse.json({

@@ -18,6 +18,7 @@ import {
 import toast from "react-hot-toast";
 import AlertModal from "@/components/AlertModal";
 import ConfirmModal from "@/components/ConfirmModal";
+import DateTimePicker from "@/components/DateTimePicker";
 import { authFetch } from "@/lib/authFetch";
 
 interface Voter {
@@ -548,7 +549,6 @@ export default function VotersPage() {
         body: JSON.stringify({
           electionId: selectedElection,
           voters: pendingBulkFile.rows,
-          deliveryMethod: bulkDeliveryMethod,
         }),
       });
 
@@ -588,6 +588,7 @@ export default function VotersPage() {
           electionId: selectedElection,
           batchId: uploadResults.batchId,
           credentialsSendAt: new Date(bulkScheduledSendAt).toISOString(),
+          deliveryMethod: bulkDeliveryMethod,
         }),
       });
 
@@ -1465,14 +1466,11 @@ export default function VotersPage() {
                           Send Credentials On{" "}
                           <span className="text-red-500">*</span>
                         </label>
-                        <input
-                          type="datetime-local"
-                          required
+                        <DateTimePicker
                           value={scheduledSendAt}
+                          onChange={setScheduledSendAt}
                           min={minScheduleValue}
                           max={maxScheduleValue}
-                          onChange={(e) => setScheduledSendAt(e.target.value)}
-                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
                         />
                         <p className="text-xs text-gray-500 mt-1">
                           The voter&apos;s login link and password are generated
@@ -1705,21 +1703,78 @@ export default function VotersPage() {
                         {uploadResults.successful} voter(s) from this upload
                         are stored and waiting to be scheduled.
                       </p>
+
+                      {/* Delivery Method Selection for Bulk Upload */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Send Credentials Via{" "}
+                          <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex gap-4">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="bulkDeliveryMethod"
+                              value="email"
+                              checked={bulkDeliveryMethod === "email"}
+                              onChange={(e) =>
+                                setBulkDeliveryMethod(
+                                  e.target.value as "email" | "sms" | "both",
+                                )
+                              }
+                              className="w-4 h-4 text-[#d4af37]"
+                            />
+                            <span className="text-sm text-gray-700">
+                              Email Only
+                            </span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="bulkDeliveryMethod"
+                              value="sms"
+                              checked={bulkDeliveryMethod === "sms"}
+                              onChange={(e) =>
+                                setBulkDeliveryMethod(
+                                  e.target.value as "email" | "sms" | "both",
+                                )
+                              }
+                              className="w-4 h-4 text-[#d4af37]"
+                            />
+                            <span className="text-sm text-gray-700">
+                              SMS Only
+                            </span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="bulkDeliveryMethod"
+                              value="both"
+                              checked={bulkDeliveryMethod === "both"}
+                              onChange={(e) =>
+                                setBulkDeliveryMethod(
+                                  e.target.value as "email" | "sms" | "both",
+                                )
+                              }
+                              className="w-4 h-4 text-[#d4af37]"
+                            />
+                            <span className="text-sm text-gray-700">
+                              Both Email & SMS
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           Send Credentials On{" "}
                           <span className="text-red-500">*</span>
                         </label>
-                        <input
-                          type="datetime-local"
-                          required
+                        <DateTimePicker
                           value={bulkScheduledSendAt}
+                          onChange={setBulkScheduledSendAt}
                           min={minScheduleValue}
                           max={maxScheduleValue}
-                          onChange={(e) =>
-                            setBulkScheduledSendAt(e.target.value)
-                          }
-                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
                         />
                         <p className="text-xs text-gray-500 mt-1">
                           Applies to this batch. Each voter&apos;s login link
@@ -1822,67 +1877,6 @@ export default function VotersPage() {
                     )}
                   </div>
 
-                  {/* Delivery Method Selection for Bulk Upload */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Send Credentials Via{" "}
-                      <span className="text-red-500">*</span>
-                    </label>
-                    <div className="flex gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="bulkDeliveryMethod"
-                          value="email"
-                          checked={bulkDeliveryMethod === "email"}
-                          onChange={(e) =>
-                            setBulkDeliveryMethod(
-                              e.target.value as "email" | "sms" | "both",
-                            )
-                          }
-                          className="w-4 h-4 text-[#d4af37]"
-                        />
-                        <span className="text-sm text-gray-700">
-                          Email Only
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="bulkDeliveryMethod"
-                          value="sms"
-                          checked={bulkDeliveryMethod === "sms"}
-                          onChange={(e) =>
-                            setBulkDeliveryMethod(
-                              e.target.value as "email" | "sms" | "both",
-                            )
-                          }
-                          className="w-4 h-4 text-[#d4af37]"
-                        />
-                        <span className="text-sm text-gray-700">
-                          SMS Only
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="bulkDeliveryMethod"
-                          value="both"
-                          checked={bulkDeliveryMethod === "both"}
-                          onChange={(e) =>
-                            setBulkDeliveryMethod(
-                              e.target.value as "email" | "sms" | "both",
-                            )
-                          }
-                          className="w-4 h-4 text-[#d4af37]"
-                        />
-                        <span className="text-sm text-gray-700">
-                          Both Email & SMS
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-
                   <div className="flex gap-3 justify-end pt-2">
                     <button
                       onClick={cancelPendingBulkFile}
@@ -1976,14 +1970,11 @@ export default function VotersPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   New Send Date/Time <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="datetime-local"
-                  required
+                <DateTimePicker
                   value={rescheduleSendAt}
+                  onChange={setRescheduleSendAt}
                   min={minScheduleValue}
                   max={maxScheduleValue}
-                  onChange={(e) => setRescheduleSendAt(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
                 />
               </div>
               <div className="flex gap-3 justify-end pt-2">
