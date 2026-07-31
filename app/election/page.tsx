@@ -129,18 +129,27 @@ function ElectionHomeContent() {
     setLoading(false);
   }, [urlToken]);
 
+  useEffect(() => {
+    if (!voterData || voterData.hasVoted) return;
+    const voterToken = urlToken || localStorage.getItem("voterToken");
+    if (!voterToken) return;
+    const id = setInterval(() => refreshVoterData(voterToken), 45_000);
+    return () => clearInterval(id);
+  }, [voterData?.hasVoted, urlToken]);
+
   const pad = (n: number) => String(n).padStart(2, "0");
-  const now = new Date();
 
   const election    = voterData?.election ?? null;
-  const vStart      = election ? new Date(election.startDate) : null;
-  const vEnd        = election ? new Date(election.endDate) : null;
-  const vIsActive   = election ? (now >= vStart! && now <= vEnd!) : false;
-  const vHasEnded   = election ? (election.status === "ended" || now > vEnd!) : false;
-  const vIsUpcoming = election ? (!vIsActive && !vHasEnded) : false;
+  const vIsActive   = election ? election.status === "active" : false;
+  const vHasEnded   = election ? election.status === "ended" : false;
+  const vIsUpcoming = election ? election.status === "upcoming" : false;
+
+  const countdownTarget = election
+    ? vIsUpcoming ? election.startDate : vIsActive ? election.endDate : null
+    : null;
 
   const voterCountdown = useCountdown(
-    voterData ? (election ? election.endDate : null) : null,
+    voterData ? countdownTarget : null,
     () => {
       const storedToken = urlToken || localStorage.getItem("voterToken");
       if (storedToken) refreshVoterData(storedToken);
