@@ -55,6 +55,7 @@ interface PositionResult {
   position: string;
   totalVotes: number;
   isTied: boolean;
+  isSoloTied?: boolean;
   tiedCount: number;
   candidates: {
     rank: number;
@@ -63,10 +64,16 @@ interface PositionResult {
     votes: number;
     percentage: string;
     status: string;
+    // Only present for a single-candidate (YES/NO referendum) position —
+    // explicit rejections, kept separate from "didn't vote at all".
+    noVoteCount?: number;
+    noPercentage?: string;
+    noStatus?: string;
   }[];
 }
 
 interface ResultsReport {
+  electionId: string;
   election: { title: string; startDate: string; endDate: string; status: string };
   totalVoters: number;
   votedCount: number;
@@ -75,6 +82,8 @@ interface ResultsReport {
 }
 
 type ReportTab = "activity" | "results" | "failed" | "polling" | "ec" | "pinksheet";
+
+const PAGE_SIZE = 20;
 
 // Initials avatar
 function Avatar({ name }: { name: string }) {
@@ -320,6 +329,8 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<ReportTab>("activity");
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [activityPage, setActivityPage] = useState(1);
+  const [failedPage, setFailedPage] = useState(1);
 
   const [activityData, setActivityData] = useState<VoterActivity[]>([]);
   const [resultsData, setResultsData] = useState<ResultsReport | null>(null);
@@ -454,9 +465,13 @@ export default function ReportsPage() {
   useEffect(() => { fetchElections(); }, []);
   useEffect(() => {
     if (!selectedElection) return;
-    // pinksheet, ec, and polling all require the results data
+    // pinksheet, ec, and polling all require the results data — only skip
+    // refetching if what's cached actually belongs to the currently
+    // selected election (switching tabs shouldn't refetch, switching
+    // elections always should, otherwise an export can silently keep using
+    // the previous election's data after the dropdown changes).
     if (['pinksheet', 'ec', 'polling'].includes(activeTab)) {
-      if (!resultsData) loadReport('results');
+      if (!resultsData || resultsData.electionId !== selectedElection) loadReport('results');
     } else {
       loadReport(activeTab);
     }
@@ -512,6 +527,22 @@ export default function ReportsPage() {
     );
   };
 
+  // A solo (referendum) position needs Yes/No/Did-Not-Vote spelled out as
+  // three separate rows — a plain per-candidate row would only ever show
+  // the Yes side and silently fold explicit "No" votes into abstentions.
+  const positionExportRows = (p: PositionResult): string[][] => {
+    if (p.candidates.length === 1 && p.candidates[0].noVoteCount !== undefined && resultsData) {
+      const c = p.candidates[0];
+      const notVoted = Math.max(0, resultsData.totalVoters - p.totalVotes);
+      const notVotedPct = resultsData.totalVoters > 0 ? ((notVoted / resultsData.totalVoters) * 100).toFixed(1) : "0.0";
+      return [
+        [p.position, "1", `Yes — ${c.name}`, String(c.ballotNumber || ""), String(c.votes), c.percentage + "%", c.status],
+        [p.position, "2", `No — ${c.name}`, "", String(c.noVoteCount || 0), (c.noPercentage || "0") + "%", c.noStatus || "—"],
+      ];
+    }
+    return p.candidates.map((c) => [p.position, String(c.rank), c.name, String(c.ballotNumber || ""), String(c.votes), c.percentage + "%", c.status]);
+  };
+
   const exportResultsCSV = () => {
     if (!resultsData) return;
     downloadCSV(
@@ -519,7 +550,7 @@ export default function ReportsPage() {
        [resultsData.election.title, String(resultsData.totalVoters), String(resultsData.votedCount), resultsData.turnoutRate + "%"],
        [],
        ["Position", "Rank", "Candidate", "Ballot #", "Votes", "Percentage", "Status"],
-       ...resultsData.positions.flatMap((p) => p.candidates.map((c) => [p.position, String(c.rank), c.name, String(c.ballotNumber || ""), String(c.votes), c.percentage + "%", c.status]))],
+       ...resultsData.positions.flatMap(positionExportRows)],
       `election-results-${Date.now()}.csv`
     );
   };
@@ -546,6 +577,7 @@ export default function ReportsPage() {
     if (hasSigs) {
       // ── PDF via print ──
       const positionsHTML = resultsData.positions.map((p) => {
+        const isSolo = p.candidates.length === 1 && p.candidates[0].noVoteCount !== undefined;
         const rows = p.candidates.map((c) => {
           const sigKey = `polling_agent_${p.position}_${c.name}`;
           const sig = signatures[sigKey];
@@ -554,14 +586,26 @@ export default function ReportsPage() {
             : `<span style="display:inline-block;width:200px;border-bottom:1.5px dashed #d1d5db;">&nbsp;</span>`;
           const statusColor = c.status === 'Elected' ? '#15803d' : c.status === 'Tied' ? '#92400e' : c.status === 'Leading' ? '#1d4ed8' : '#6b7280';
           return `<tr>
-            <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;">${c.name}</td>
+            <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;">${isSolo ? `Yes — ${c.name}` : c.name}</td>
             <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;text-align:center;font-family:monospace;">${c.ballotNumber || '—'}</td>
             <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;text-align:center;font-weight:700;font-size:15px;">${c.votes}</td>
             <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;text-align:center;">${c.percentage}%</td>
             <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;font-weight:600;color:${statusColor};">${c.status}</td>
             <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;">${sigCell}</td>
           </tr>`;
-        }).join('');
+        }).join('') + (isSolo ? (() => {
+          const c = p.candidates[0];
+          const notVoted = Math.max(0, resultsData.totalVoters - p.totalVotes);
+          const notVotedPct = resultsData.totalVoters > 0 ? ((notVoted / resultsData.totalVoters) * 100).toFixed(1) : '0.0';
+          return `<tr style="background:#fef2f2;">
+            <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;">No — ${c.name}</td>
+            <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;text-align:center;">—</td>
+            <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;text-align:center;font-weight:700;font-size:15px;">${c.noVoteCount || 0}</td>
+            <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;text-align:center;">${c.noPercentage}%</td>
+            <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;font-weight:600;color:#b91c1c;">${c.noStatus || '—'}</td>
+            <td style="padding:11px 14px;border-bottom:1px solid #f3f4f6;color:#9ca3af;font-style:italic;font-size:12px;">No candidate to sign for</td>
+          </tr>`;
+        })() : '');
         const officerKey = `polling_officer_${p.position}`;
         const officerSig = signatures[officerKey];
         const officerCell = officerSig
@@ -651,7 +695,17 @@ export default function ReportsPage() {
         rows.push([`POSITION: ${p.position}`, `Total Votes: ${p.totalVotes}`]);
         if (p.isTied) rows.push([`NOTE: Dead Heat — ${p.tiedCount} candidates tied. A tiebreaker process is required.`]);
         rows.push(["Candidate", "Ballot #", "Votes", "Percentage", "Status"]);
-        p.candidates.forEach((c) => rows.push([c.name, String(c.ballotNumber || "—"), String(c.votes), `${c.percentage}%`, c.status]));
+        const isSolo = p.candidates.length === 1 && p.candidates[0].noVoteCount !== undefined;
+        if (isSolo) {
+          const c = p.candidates[0];
+          const notVoted = Math.max(0, resultsData.totalVoters - p.totalVotes);
+          const notVotedPct = resultsData.totalVoters > 0 ? ((notVoted / resultsData.totalVoters) * 100).toFixed(1) : "0.0";
+          rows.push([`Yes — ${c.name}`, String(c.ballotNumber || "—"), String(c.votes), `${c.percentage}%`, c.status]);
+          rows.push([`No — ${c.name}`, "—", String(c.noVoteCount || 0), `${c.noPercentage}%`, c.noStatus || "—"]);
+          
+        } else {
+          p.candidates.forEach((c) => rows.push([c.name, String(c.ballotNumber || "—"), String(c.votes), `${c.percentage}%`, c.status]));
+        }
         rows.push([]);
       });
       rows.push(["Report prepared by KsTU Election System"]);
@@ -669,15 +723,26 @@ export default function ReportsPage() {
        [`SUMMARY`],
        ["Total Registered Voters", String(resultsData.totalVoters)],
        ["Total Votes Cast", String(resultsData.votedCount)],
-       ["Did Not Vote", String(resultsData.totalVoters - resultsData.votedCount)],
        ["Voter Turnout", resultsData.turnoutRate + "%"], [],
        [`ELECTION RESULTS BY POSITION`], [],
-       ...resultsData.positions.flatMap((p) => [
-         [`Position: ${p.position} (Total Votes: ${p.totalVotes})`],
-         ["Rank", "Candidate", "Votes", "Percentage", "Status"],
-         ...p.candidates.map((c) => [String(c.rank), c.name, String(c.votes), c.percentage + "%", c.status]),
-         [],
-       ]),
+       ...resultsData.positions.flatMap((p) => {
+         const isSolo = p.candidates.length === 1 && p.candidates[0].noVoteCount !== undefined;
+         const c = p.candidates[0];
+         const notVoted = isSolo ? Math.max(0, resultsData.totalVoters - p.totalVotes) : 0;
+         const notVotedPct = resultsData.totalVoters > 0 ? ((notVoted / resultsData.totalVoters) * 100).toFixed(1) : "0.0";
+         return [
+           [`Position: ${p.position} (Total Votes: ${p.totalVotes})`],
+           ["Rank", "Candidate", "Votes", "Percentage", "Status"],
+           ...(isSolo
+             ? [
+                 ["1", `Yes — ${c.name}`, String(c.votes), c.percentage + "%", c.status],
+                 ["2", `No — ${c.name}`, String(c.noVoteCount || 0), (c.noPercentage || "0") + "%", c.noStatus || "—"],
+
+               ]
+             : p.candidates.map((cand) => [String(cand.rank), cand.name, String(cand.votes), cand.percentage + "%", cand.status])),
+           [],
+         ];
+       }),
        [], ["Prepared by: Electoral Commission"], [`Date: ${new Date().toLocaleString()}`]],
       `ec-report-${Date.now()}.csv`
     );
@@ -698,6 +763,7 @@ export default function ReportsPage() {
     if (hasSigs) {
       // ── PDF via print ──
       const positionsHTML = resultsData.positions.map((p) => {
+        const isSolo = p.candidates.length === 1 && p.candidates[0].noVoteCount !== undefined;
         const rows = p.candidates.map((c) => {
           const sigKey = `agent_${p.position}_${c.name}`;
           const sig = signatures[sigKey];
@@ -714,13 +780,30 @@ export default function ReportsPage() {
             : '';
           return `<tr style="background:${rowBg};">
             <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;text-align:center;font-family:monospace;color:#6b7280;">${c.rank}</td>
-            <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;font-weight:600;">${c.name}${badge}</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;font-weight:600;">${isSolo ? `Yes — ${c.name}` : c.name}${badge}</td>
             <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;text-align:center;font-family:monospace;">${c.ballotNumber || '—'}</td>
             <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;text-align:center;font-size:16px;font-weight:700;">${c.votes}</td>
             <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;text-align:center;">${c.percentage}%</td>
             <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;">${sigCell}</td>
           </tr>`;
-        }).join('');
+        }).join('') + (isSolo ? (() => {
+          const c = p.candidates[0];
+          const notVoted = Math.max(0, resultsData.totalVoters - p.totalVotes);
+          const notVotedPct = resultsData.totalVoters > 0 ? ((notVoted / resultsData.totalVoters) * 100).toFixed(1) : '0.0';
+          const noBadge = c.noStatus === 'Tied'
+            ? `<span style="background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:6px;">Tied</span>`
+            : (c.noStatus === 'Rejected' || c.noStatus === 'Leading')
+            ? `<span style="background:#dc2626;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:6px;">${c.noStatus}</span>`
+            : '';
+          return `<tr style="background:#fef2f2;">
+            <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;text-align:center;font-family:monospace;color:#6b7280;">—</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;font-weight:600;">No — ${c.name}${noBadge}</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;text-align:center;">—</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;text-align:center;font-size:16px;font-weight:700;">${c.noVoteCount || 0}</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;text-align:center;">${c.noPercentage}%</td>
+            <td style="padding:12px 14px;border-bottom:1px solid #f3f4f6;color:#9ca3af;font-style:italic;font-size:12px;">No candidate to sign for</td>
+          </tr>`;
+        })() : '');
 
         const officerKey = `officer_${p.position}`;
         const officerSig = signatures[officerKey];
@@ -812,7 +895,6 @@ export default function ReportsPage() {
         ["ELECTION SUMMARY"],
         ["Total Registered Voters", String(resultsData.totalVoters)],
         ["Total Votes Cast", String(resultsData.votedCount)],
-        ["Did Not Vote", String(resultsData.totalVoters - resultsData.votedCount)],
         ["Voter Turnout", `${resultsData.turnoutRate}%`],
         [],
         ["RESULTS BY POSITION"],
@@ -822,7 +904,16 @@ export default function ReportsPage() {
         rows.push([`POSITION: ${p.position}`, `Total Votes: ${p.totalVotes}`]);
         if (p.isTied) rows.push([`NOTE: Dead Heat — ${p.tiedCount} candidates tied. A tiebreaker process is required.`]);
         rows.push(["Rank", "Candidate", "Ballot #", "Votes", "Percentage", "Status"]);
-        p.candidates.forEach((c) => rows.push([String(c.rank), c.name, String(c.ballotNumber || "—"), String(c.votes), `${c.percentage}%`, c.status]));
+        const isSolo = p.candidates.length === 1 && p.candidates[0].noVoteCount !== undefined;
+        if (isSolo) {
+          const c = p.candidates[0];
+          const notVoted = Math.max(0, resultsData.totalVoters - p.totalVotes);
+          const notVotedPct = resultsData.totalVoters > 0 ? ((notVoted / resultsData.totalVoters) * 100).toFixed(1) : "0.0";
+          rows.push(["1", `Yes — ${c.name}`, String(c.ballotNumber || "—"), String(c.votes), `${c.percentage}%`, c.status]);
+          rows.push(["2", `No — ${c.name}`, "—", String(c.noVoteCount || 0), `${c.noPercentage}%`, c.noStatus || "—"]);
+        } else {
+          p.candidates.forEach((c) => rows.push([String(c.rank), c.name, String(c.ballotNumber || "—"), String(c.votes), `${c.percentage}%`, c.status]));
+        }
         rows.push([]);
       });
       rows.push(["This is an official election document. Unauthorized alteration is prohibited."]);
@@ -847,6 +938,20 @@ export default function ReportsPage() {
   );
   const filteredFailed = failedData.filter((v) =>
     !search || [v.name, v.email, v.phone, v.voterId, v.token].some((f) => f?.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  const activityTotalPages = Math.max(1, Math.ceil(filteredActivity.length / PAGE_SIZE));
+  const currentActivityPage = Math.min(activityPage, activityTotalPages);
+  const pagedActivity = filteredActivity.slice(
+    (currentActivityPage - 1) * PAGE_SIZE,
+    currentActivityPage * PAGE_SIZE,
+  );
+
+  const failedTotalPages = Math.max(1, Math.ceil(filteredFailed.length / PAGE_SIZE));
+  const currentFailedPage = Math.min(failedPage, failedTotalPages);
+  const pagedFailed = filteredFailed.slice(
+    (currentFailedPage - 1) * PAGE_SIZE,
+    currentFailedPage * PAGE_SIZE,
   );
 
   const EmptyState = ({ icon: Icon, title, body }: { icon: any; title: string; body: string }) => (
@@ -887,7 +992,7 @@ export default function ReportsPage() {
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Select Election</label>
           <Select
             value={selectedElection}
-            onChange={setSelectedElection}
+            onChange={(v) => { setSelectedElection(v); setActivityPage(1); setFailedPage(1); }}
             placeholder="Select an election…"
             options={elections.map((e) => ({
               value: e._id,
@@ -976,7 +1081,7 @@ export default function ReportsPage() {
                       type="text"
                       placeholder="Search voters…"
                       value={search}
-                      onChange={(e) => setSearch(e.target.value)}
+                      onChange={(e) => { setSearch(e.target.value); setActivityPage(1); }}
                       className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D4AF37] w-44"
                     />
                   </div>
@@ -1010,9 +1115,9 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {filteredActivity.map((v, i) => (
+                      {pagedActivity.map((v, i) => (
                         <tr key={v._id} className="hover:bg-gray-50 transition-colors">
-                          <td className="py-3 px-4 text-gray-400 text-xs">{i + 1}</td>
+                          <td className="py-3 px-4 text-gray-400 text-xs">{(currentActivityPage - 1) * PAGE_SIZE + i + 1}</td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-3">
                               <Avatar name={v.name} />
@@ -1052,6 +1157,29 @@ export default function ReportsPage() {
                   </table>
                   {filteredActivity.length === 0 && search && (
                     <div className="py-10 text-center text-sm text-gray-400">No voters match &ldquo;{search}&rdquo;</div>
+                  )}
+                  {filteredActivity.length > 0 && activityTotalPages > 1 && (
+                    <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-gray-100">
+                      <p className="text-xs text-gray-500">
+                        Page {currentActivityPage} of {activityTotalPages} · {filteredActivity.length} voter{filteredActivity.length !== 1 ? "s" : ""}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setActivityPage(Math.max(1, currentActivityPage - 1))}
+                          disabled={currentActivityPage <= 1}
+                          className="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                        >
+                          Prev
+                        </button>
+                        <button
+                          onClick={() => setActivityPage(Math.min(activityTotalPages, currentActivityPage + 1))}
+                          disabled={currentActivityPage >= activityTotalPages}
+                          className="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
@@ -1107,12 +1235,8 @@ export default function ReportsPage() {
                           </thead>
                           <tbody className="divide-y divide-gray-50">
                             {pos.candidates.map((c) => {
-                              const isWinner = c.rank === 1 && c.votes > 0;
                               const isSolo = pos.candidates.length === 1;
-                              // For solo candidate, show votes relative to total registered voters
-                              const displayPct = isSolo && resultsData.totalVoters > 0
-                                ? ((c.votes / resultsData.totalVoters) * 100).toFixed(1)
-                                : c.percentage;
+                              const isWinner = isSolo ? (c.status === "Elected" || c.status === "Leading") : (c.rank === 1 && c.votes > 0);
                               return (
                                 <tr key={c.rank} className={`transition-colors ${isWinner ? "bg-green-50 hover:bg-green-100/60" : "hover:bg-gray-50"}`}>
                                   <td className="py-4 px-4">
@@ -1124,7 +1248,7 @@ export default function ReportsPage() {
                                     <div className="flex items-center gap-3">
                                       <Avatar name={c.name} />
                                       <div>
-                                        <span className="font-semibold text-gray-900">{c.name}</span>
+                                        <span className="font-semibold text-gray-900">{isSolo ? `Yes — ${c.name}` : c.name}</span>
                                         {isSolo && <p className="text-xs text-gray-400 mt-0.5">Voted for this candidate</p>}
                                       </div>
                                     </div>
@@ -1133,8 +1257,8 @@ export default function ReportsPage() {
                                   <td className="py-4 px-4 font-bold text-gray-900">{c.votes.toLocaleString()}</td>
                                   <td className="py-4 px-4">
                                     <div className="flex items-center gap-2">
-                                      <MiniBar pct={parseFloat(displayPct)} color={isWinner ? "bg-[#D4AF37]" : "bg-gray-300"} />
-                                      <span className="text-xs text-gray-600 font-medium w-10">{displayPct}%</span>
+                                      <MiniBar pct={parseFloat(c.percentage)} color={isWinner ? "bg-[#D4AF37]" : "bg-gray-300"} />
+                                      <span className="text-xs text-gray-600 font-medium w-10">{c.percentage}%</span>
                                     </div>
                                   </td>
                                   <td className="py-4 px-4">
@@ -1150,38 +1274,45 @@ export default function ReportsPage() {
                                 </tr>
                               );
                             })}
-                            {/* Solo candidate: show "Did Not Vote" row */}
-                            {pos.candidates.length === 1 && (() => {
-                              const notVotedCount = Math.max(0, resultsData.totalVoters - pos.candidates[0].votes);
-                              const notVotedPct = resultsData.totalVoters > 0 ? ((notVotedCount / resultsData.totalVoters) * 100).toFixed(1) : "0.0";
+                            {/* Solo candidate: explicit "No" row, separate from true abstainers */}
+                            {pos.candidates.length === 1 && pos.candidates[0].noVoteCount !== undefined && (() => {
+                              const cNo = pos.candidates[0];
+                              const noWinner = cNo.noStatus === "Rejected" || cNo.noStatus === "Leading";
                               return (
-                                <tr className="hover:bg-gray-50 border-t-2 border-gray-100">
+                                <tr className={noWinner ? "bg-red-50 hover:bg-red-100/60" : "hover:bg-red-50/40"}>
                                   <td className="py-4 px-4">
-                                    <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gray-100">
-                                      <span className="text-gray-400 text-xs font-bold">—</span>
+                                    <div className="w-7 h-7 rounded-full flex items-center justify-center bg-red-50">
+                                      <XCircle size={13} className="text-red-400" />
                                     </div>
                                   </td>
                                   <td className="py-4 px-4">
                                     <div className="flex items-center gap-3">
-                                      <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
-                                        <Users size={14} className="text-gray-400" />
+                                      <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center shrink-0">
+                                        <XCircle size={14} className="text-red-400" />
                                       </div>
                                       <div>
-                                        <span className="font-semibold text-gray-500 italic">Did Not Vote</span>
-                                        <p className="text-xs text-gray-400 mt-0.5">Registered voters who abstained</p>
+                                        <span className="font-semibold text-gray-900">No — {cNo.name}</span>
+                                        <p className="text-xs text-gray-400 mt-0.5">Voted against this candidate</p>
                                       </div>
                                     </div>
                                   </td>
                                   <td className="py-4 px-4 text-gray-400">—</td>
-                                  <td className="py-4 px-4 font-bold text-gray-600">{notVotedCount.toLocaleString()}</td>
+                                  <td className="py-4 px-4 font-bold text-gray-900">{(cNo.noVoteCount || 0).toLocaleString()}</td>
                                   <td className="py-4 px-4">
                                     <div className="flex items-center gap-2">
-                                      <MiniBar pct={parseFloat(notVotedPct)} color="bg-gray-300" />
-                                      <span className="text-xs text-gray-500 font-medium w-10">{notVotedPct}%</span>
+                                      <MiniBar pct={parseFloat(cNo.noPercentage || "0")} color="bg-red-400" />
+                                      <span className="text-xs text-gray-600 font-medium w-10">{cNo.noPercentage}%</span>
                                     </div>
                                   </td>
                                   <td className="py-4 px-4">
-                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Abstained</span>
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
+                                      cNo.noStatus === "Tied" ? "bg-amber-100 text-amber-700 border border-amber-200"
+                                      : cNo.noStatus === "Rejected" ? "bg-red-100 text-red-700 border border-red-200"
+                                      : cNo.noStatus === "Leading" ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                      : "bg-gray-100 text-gray-500"
+                                    }`}>
+                                      {cNo.noStatus}
+                                    </span>
                                   </td>
                                 </tr>
                               );
@@ -1210,7 +1341,7 @@ export default function ReportsPage() {
                 <div className="flex items-center gap-2">
                   <div className="relative">
                     <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="text" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)}
+                    <input type="text" placeholder="Search…" value={search} onChange={(e) => { setSearch(e.target.value); setFailedPage(1); }}
                       className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D4AF37] w-40" />
                   </div>
                   <button onClick={() => loadReport("failed")} className="p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition">
@@ -1238,9 +1369,9 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {filteredFailed.map((v, i) => (
+                      {pagedFailed.map((v, i) => (
                         <tr key={v._id} className="hover:bg-red-50/40 transition-colors">
-                          <td className="py-3 px-4 text-gray-400 text-xs">{i + 1}</td>
+                          <td className="py-3 px-4 text-gray-400 text-xs">{(currentFailedPage - 1) * PAGE_SIZE + i + 1}</td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-3">
                               <Avatar name={v.name} />
@@ -1264,6 +1395,29 @@ export default function ReportsPage() {
                   </table>
                   {filteredFailed.length === 0 && search && (
                     <div className="py-10 text-center text-sm text-gray-400">No voters match &ldquo;{search}&rdquo;</div>
+                  )}
+                  {filteredFailed.length > 0 && failedTotalPages > 1 && (
+                    <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-gray-100">
+                      <p className="text-xs text-gray-500">
+                        Page {currentFailedPage} of {failedTotalPages} · {filteredFailed.length} voter{filteredFailed.length !== 1 ? "s" : ""}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setFailedPage(Math.max(1, currentFailedPage - 1))}
+                          disabled={currentFailedPage <= 1}
+                          className="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                        >
+                          Prev
+                        </button>
+                        <button
+                          onClick={() => setFailedPage(Math.min(failedTotalPages, currentFailedPage + 1))}
+                          disabled={currentFailedPage >= failedTotalPages}
+                          className="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
@@ -1292,7 +1446,7 @@ export default function ReportsPage() {
                   </p>
                 </div>
                 <button
-                  onClick={() => { if (!resultsData) { loadReport("results"); setTimeout(exportPollingAgent, 800); } else { exportPollingAgent(); } }}
+                  onClick={() => { if (!resultsData || resultsData.electionId !== selectedElection) { loadReport("results"); setTimeout(exportPollingAgent, 800); } else { exportPollingAgent(); } }}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#D4AF37] text-white text-sm rounded-lg hover:bg-[#D4AF37] transition"
                 >
                   {(() => {
@@ -1329,30 +1483,50 @@ export default function ReportsPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-50">
-                            {pos.candidates.map((c) => (
-                              <tr key={c.rank} className="hover:bg-gray-50">
-                                <td className="py-5 px-5">
-                                  <div className="flex items-center gap-3">
-                                    <Avatar name={c.name} />
-                                    <span className="font-medium text-gray-900">{c.name}</span>
-                                  </div>
-                                </td>
-                                <td className="py-5 px-5 text-gray-500">{c.ballotNumber || "—"}</td>
-                                <td className="py-5 px-5 font-bold text-[#D4AF37]">{c.votes}</td>
-                                <td className="py-5 px-5">
-                                  <SignatureField
-                                    fieldKey={`polling_agent_${pos.position}_${c.name}`}
-                                    label={`${c.name} — Agent Signature (${pos.position})`}
-                                    signatures={signatures}
-                                    onSign={(key, label) =>
-                                      currentElection?.settings?.requireAgentSignature
-                                        ? handleAgentSign(key, label, c.name, pos.position)
-                                        : openSigModal(key, label)
-                                    }
-                                  />
-                                </td>
-                              </tr>
-                            ))}
+                            {pos.candidates.map((c) => {
+                              const isSolo = pos.candidates.length === 1 && c.noVoteCount !== undefined;
+                              return (
+                                <tr key={c.rank} className="hover:bg-gray-50">
+                                  <td className="py-5 px-5">
+                                    <div className="flex items-center gap-3">
+                                      <Avatar name={c.name} />
+                                      <span className="font-medium text-gray-900">{isSolo ? `Yes — ${c.name}` : c.name}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-5 px-5 text-gray-500">{c.ballotNumber || "—"}</td>
+                                  <td className="py-5 px-5 font-bold text-[#D4AF37]">{c.votes}</td>
+                                  <td className="py-5 px-5">
+                                    <SignatureField
+                                      fieldKey={`polling_agent_${pos.position}_${c.name}`}
+                                      label={`${c.name} — Agent Signature (${pos.position})`}
+                                      signatures={signatures}
+                                      onSign={(key, label) =>
+                                        currentElection?.settings?.requireAgentSignature
+                                          ? handleAgentSign(key, label, c.name, pos.position)
+                                          : openSigModal(key, label)
+                                      }
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {/* Solo (referendum) position: explicit No row, separate from true abstainers */}
+                            {pos.candidates.length === 1 && pos.candidates[0].noVoteCount !== undefined && (() => {
+                              const c = pos.candidates[0];
+                              return (
+                                <tr className="bg-red-50/40 hover:bg-red-50">
+                                  <td className="py-5 px-5">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center shrink-0"><XCircle size={16} className="text-red-400" /></div>
+                                      <span className="font-medium text-gray-900">No — {c.name}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-5 px-5 text-gray-500">—</td>
+                                  <td className="py-5 px-5 font-bold text-[#D4AF37]">{c.noVoteCount || 0}</td>
+                                  <td className="py-5 px-5 text-xs text-gray-400 italic">No candidate to sign for</td>
+                                </tr>
+                              );
+                            })()}
                             <tr className="bg-gray-50 border-t-2 border-gray-200">
                               <td className="py-3 px-5 font-bold text-gray-800 text-sm">Total</td>
                               <td />
@@ -1438,11 +1612,8 @@ export default function ReportsPage() {
                           </thead>
                           <tbody className="divide-y divide-gray-50">
                             {pos.candidates.map((c) => {
-                              const isWinner = c.rank === 1 && c.votes > 0;
                               const isSolo = pos.candidates.length === 1;
-                              const displayPct = isSolo && resultsData.totalVoters > 0
-                                ? ((c.votes / resultsData.totalVoters) * 100).toFixed(1)
-                                : c.percentage;
+                              const isWinner = isSolo ? (c.status === "Elected" || c.status === "Leading") : (c.rank === 1 && c.votes > 0);
                               return (
                                 <tr key={c.rank} className={isWinner ? "bg-emerald-50" : "hover:bg-gray-50"}>
                                   <td className="py-4 px-5">
@@ -1454,7 +1625,7 @@ export default function ReportsPage() {
                                     <div className="flex items-center gap-3">
                                       <Avatar name={c.name} />
                                       <div>
-                                        <span className="font-semibold text-gray-900">{c.name}</span>
+                                        <span className="font-semibold text-gray-900">{isSolo ? `Yes — ${c.name}` : c.name}</span>
                                         {isSolo && <p className="text-xs text-gray-400 mt-0.5">Voted for this candidate</p>}
                                       </div>
                                     </div>
@@ -1462,8 +1633,8 @@ export default function ReportsPage() {
                                   <td className="py-4 px-5 font-bold text-gray-900">{c.votes.toLocaleString()}</td>
                                   <td className="py-4 px-5">
                                     <div className="flex items-center gap-2">
-                                      <MiniBar pct={parseFloat(displayPct)} color={isWinner ? "bg-emerald-500" : "bg-gray-300"} />
-                                      <span className="text-xs text-gray-600 w-10">{displayPct}%</span>
+                                      <MiniBar pct={parseFloat(c.percentage)} color={isWinner ? "bg-emerald-500" : "bg-gray-300"} />
+                                      <span className="text-xs text-gray-600 w-10">{c.percentage}%</span>
                                     </div>
                                   </td>
                                   <td className="py-4 px-5">
@@ -1479,37 +1650,44 @@ export default function ReportsPage() {
                                 </tr>
                               );
                             })}
-                            {/* Solo candidate: "Did Not Vote" row */}
-                            {pos.candidates.length === 1 && (() => {
-                              const notVotedCount = Math.max(0, resultsData.totalVoters - pos.candidates[0].votes);
-                              const notVotedPct = resultsData.totalVoters > 0 ? ((notVotedCount / resultsData.totalVoters) * 100).toFixed(1) : "0.0";
+                            {/* Solo candidate: explicit "No" row, separate from true abstainers */}
+                            {pos.candidates.length === 1 && pos.candidates[0].noVoteCount !== undefined && (() => {
+                              const cNo = pos.candidates[0];
+                              const noWinner = cNo.noStatus === "Rejected" || cNo.noStatus === "Leading";
                               return (
-                                <tr className="hover:bg-gray-50 border-t-2 border-gray-100">
+                                <tr className={noWinner ? "bg-red-50" : "hover:bg-red-50/40"}>
                                   <td className="py-4 px-5">
-                                    <div className="w-7 h-7 rounded-full flex items-center justify-center bg-gray-100">
-                                      <span className="text-gray-400 text-xs font-bold">—</span>
+                                    <div className="w-7 h-7 rounded-full flex items-center justify-center bg-red-50">
+                                      <XCircle size={13} className="text-red-400" />
                                     </div>
                                   </td>
                                   <td className="py-4 px-5">
                                     <div className="flex items-center gap-3">
-                                      <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
-                                        <Users size={14} className="text-gray-400" />
+                                      <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center shrink-0">
+                                        <XCircle size={14} className="text-red-400" />
                                       </div>
                                       <div>
-                                        <span className="font-semibold text-gray-500 italic">Did Not Vote</span>
-                                        <p className="text-xs text-gray-400 mt-0.5">Registered voters who abstained</p>
+                                        <span className="font-semibold text-gray-900">No — {cNo.name}</span>
+                                        <p className="text-xs text-gray-400 mt-0.5">Voted against this candidate</p>
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="py-4 px-5 font-bold text-gray-600">{notVotedCount.toLocaleString()}</td>
+                                  <td className="py-4 px-5 font-bold text-gray-900">{(cNo.noVoteCount || 0).toLocaleString()}</td>
                                   <td className="py-4 px-5">
                                     <div className="flex items-center gap-2">
-                                      <MiniBar pct={parseFloat(notVotedPct)} color="bg-gray-300" />
-                                      <span className="text-xs text-gray-500 w-10">{notVotedPct}%</span>
+                                      <MiniBar pct={parseFloat(cNo.noPercentage || "0")} color="bg-red-400" />
+                                      <span className="text-xs text-gray-600 w-10">{cNo.noPercentage}%</span>
                                     </div>
                                   </td>
                                   <td className="py-4 px-5">
-                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Abstained</span>
+                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${
+                                      cNo.noStatus === "Tied" ? "bg-amber-100 text-amber-700 border border-amber-200"
+                                      : cNo.noStatus === "Rejected" ? "bg-red-100 text-red-700 border border-red-200"
+                                      : cNo.noStatus === "Leading" ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                      : "bg-gray-100 text-gray-500"
+                                    }`}>
+                                      {cNo.noStatus}
+                                    </span>
                                   </td>
                                 </tr>
                               );
@@ -1559,7 +1737,7 @@ export default function ReportsPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => { if (!resultsData) { loadReport("results"); setTimeout(exportPinkSheet, 800); } else { exportPinkSheet(); } }}
+                    onClick={() => { if (!resultsData || resultsData.electionId !== selectedElection) { loadReport("results"); setTimeout(exportPinkSheet, 800); } else { exportPinkSheet(); } }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-pink-600 text-white text-sm rounded-lg hover:bg-pink-700 transition"
                   >
                     <Download size={14} /> {Object.keys(signatures).length > 0 ? "Export PDF" : "Export CSV"}
@@ -1606,6 +1784,7 @@ export default function ReportsPage() {
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                             {pos.candidates.map((c) => {
+                              const isSolo = pos.candidates.length === 1 && c.noVoteCount !== undefined;
                               const isTiedCandidate = c.status === 'Tied';
                               const isWinner = c.status === 'Elected' || c.status === 'Leading';
                               return (
@@ -1619,7 +1798,7 @@ export default function ReportsPage() {
                                   <td className="py-6 px-6">
                                     <div className="flex items-center gap-3">
                                       <Avatar name={c.name} />
-                                      <span className="font-semibold text-gray-900">{c.name}</span>
+                                      <span className="font-semibold text-gray-900">{isSolo ? `Yes — ${c.name}` : c.name}</span>
                                       {isTiedCandidate && (
                                         <span className="text-xs bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded-full">
                                           Tied
@@ -1649,6 +1828,33 @@ export default function ReportsPage() {
                                 </tr>
                               );
                             })}
+                            {/* Solo (referendum) position: explicit No row, separate from true abstainers */}
+                            {pos.candidates.length === 1 && pos.candidates[0].noVoteCount !== undefined && (() => {
+                              const c = pos.candidates[0];
+                              const isNoTied = c.noStatus === 'Tied';
+                              const isNoWinner = c.noStatus === 'Rejected' || c.noStatus === 'Leading';
+                              return (
+                                <tr className={isNoTied ? 'bg-amber-50' : isNoWinner ? 'bg-red-50' : 'bg-white'}>
+                                  <td className="py-6 px-6">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center shrink-0">
+                                        <XCircle size={16} className="text-red-400" />
+                                      </div>
+                                      <span className="font-semibold text-gray-900">No — {c.name}</span>
+                                      {isNoTied && (
+                                        <span className="text-xs bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded-full">Tied</span>
+                                      )}
+                                      {isNoWinner && (
+                                        <span className="text-xs bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">{c.noStatus}</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-6 px-4 text-center font-mono font-semibold text-gray-700">—</td>
+                                  <td className="py-6 px-4 text-center font-bold text-xl text-gray-900">{c.noVoteCount || 0}</td>
+                                  <td className="py-5 px-6 text-xs text-gray-400 italic">No candidate to sign for</td>
+                                </tr>
+                              );
+                            })()}
                             <tr className="bg-gray-100 border-t-2 border-gray-300">
                               <td className="py-4 px-6 font-bold text-gray-900 uppercase tracking-wide text-sm">Total Votes</td>
                               <td />

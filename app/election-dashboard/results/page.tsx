@@ -403,18 +403,25 @@ export default function ResultsPage() {
               ? ((noCount / decidedTotal) * 100).toFixed(2)
               : "0.00";
           const isSoloTied = decidedTotal > 0 && yesCount === noCount;
+          const yesIsAhead = yesCount > noCount;
           const yesStatus = isSoloTied
             ? "Tied"
             : electionEnded
-              ? yesCount > noCount
+              ? yesIsAhead
                 ? "Elected"
                 : "Not Elected"
-              : "Leading";
+              : yesIsAhead
+                ? "Leading"
+                : "Trailing";
           const noStatus = isSoloTied
             ? "Tied"
-            : electionEnded && noCount > yesCount
-              ? "Rejected"
-              : "—";
+            : electionEnded
+              ? !yesIsAhead
+                ? "Rejected"
+                : "—"
+              : !yesIsAhead
+                ? "Leading"
+                : "—";
           return [
             `"${pos}",1,"Yes — ${solo.name}",${yesCount},${yesPct}%,${yesStatus}`,
             `"${pos}",2,"No — ${solo.name}",${noCount},${noPct}%,${noStatus}`,

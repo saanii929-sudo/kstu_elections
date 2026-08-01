@@ -19,8 +19,7 @@ export default function VisitorTracker() {
   useEffect(() => {
     const sessionId = getSessionId();
     if (!sessionId) return;
-
-    // Small delay to avoid blocking page render
+    
     const timer = setTimeout(() => {
       fetch('/api/analytics/track', {
         method: 'POST',

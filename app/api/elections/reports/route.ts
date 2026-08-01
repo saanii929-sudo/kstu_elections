@@ -59,26 +59,58 @@ export async function GET(req: NextRequest) {
         const posCandidates = candidates
           .filter((c: any) => String(c.categoryId) === String(cat._id))
           .sort((a: any, b: any) => b.voteCount - a.voteCount);
+
+        // A single-candidate position is a YES/NO referendum, not a normal
+        // race — noVoteCount (explicit rejections) must be surfaced
+        // separately from "didn't participate at all", and a tie there
+        // means yes === no, not yes === everyone-else-including-abstainers.
+        if (posCandidates.length === 1) {
+          const solo = posCandidates[0];
+          const yesVotes = solo.voteCount;
+          const noVotes = solo.noVoteCount || 0;
+          const decidedTotal = yesVotes + noVotes;
+          const isSoloTied = decidedTotal > 0 && yesVotes === noVotes;
+          const yesIsAhead = yesVotes > noVotes;
+          const yesStatus = isSoloTied ? 'Tied' : isEnded ? (yesIsAhead ? 'Elected' : 'Not Elected') : (yesIsAhead ? 'Leading' : 'Trailing');
+          const noStatus = isSoloTied ? 'Tied' : isEnded ? (!yesIsAhead ? 'Rejected' : '—') : (!yesIsAhead ? 'Leading' : '—');
+
+          return {
+            position: cat.name,
+            totalVotes: decidedTotal,
+            isTied: isSoloTied,
+            isSoloTied: true,
+            tiedCount: isSoloTied ? 2 : 0,
+            candidates: [{
+              rank: 1,
+              name: solo.name,
+              ballotNumber: solo.ballotNumber,
+              votes: yesVotes,
+              percentage: decidedTotal > 0 ? ((yesVotes / decidedTotal) * 100).toFixed(2) : '0.00',
+              status: yesStatus,
+              noVoteCount: noVotes,
+              noPercentage: decidedTotal > 0 ? ((noVotes / decidedTotal) * 100).toFixed(2) : '0.00',
+              noStatus,
+            }],
+          };
+        }
+
         const posTotal = posCandidates.reduce((s: number, c: any) => s + c.voteCount, 0);
 
         // Tie detection
         const maxVotes = posCandidates.length > 0 ? posCandidates[0].voteCount : 0;
         const tiedCount = maxVotes > 0 ? posCandidates.filter((c: any) => c.voteCount === maxVotes).length : 0;
         const isTied = tiedCount > 1;
-        // Solo-candidate referendum tie: voted count equals did-not-vote count
-        const isSoloTied = posCandidates.length === 1 && maxVotes > 0 && maxVotes === (totalVoters - maxVotes);
-        const effectiveIsTied = isTied || isSoloTied;
 
         return {
           position: cat.name,
           totalVotes: posTotal,
-          isTied: effectiveIsTied,
-          isSoloTied,
-          tiedCount: effectiveIsTied ? tiedCount : 0,
+          isTied,
+          isSoloTied: false,
+          tiedCount: isTied ? tiedCount : 0,
           candidates: posCandidates.map((c: any, i: number) => {
             const isTop = c.voteCount === maxVotes && maxVotes > 0;
             let status: string;
-            if (isTop && effectiveIsTied) status = 'Tied';
+            if (isTop && isTied) status = 'Tied';
             else if (isTop && isEnded) status = 'Elected';
             else if (isTop) status = 'Leading';
             else status = 'Trailing';
@@ -97,6 +129,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         success: true,
         data: {
+          // Lets the client detect it's holding a previous election's
+          // cached results (e.g. after switching the election dropdown)
+          // instead of silently exporting/displaying stale data.
+          electionId: String(electionId),
           election: { title: election.title, startDate: election.startDate, endDate: election.endDate, status: isEnded ? 'ended' : election.status },
           totalVoters,
           votedCount,

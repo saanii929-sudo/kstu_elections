@@ -16,8 +16,6 @@ interface SelectProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
-  /** Shows an inline filter box in the popover. Defaults to on — pass false
-   *  to hide it for short, fixed lists (e.g. a 2-option Yes/No select). */
   searchable?: boolean;
 }
 
@@ -38,8 +36,6 @@ export default function Select({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  // Portal target isn't available during SSR, and rendering into it before
-  // hydration would mismatch — flip on once mounted client-side.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -84,11 +80,6 @@ export default function Select({
     function reposition() {
       if (!triggerRef.current) return;
       const rect = triggerRef.current.getBoundingClientRect();
-      // Estimate the popover's real height (search box + up to 6 visible
-      // rows before it scrolls internally) instead of assuming a flat
-      // worst-case max — a short list (e.g. 2 options) comfortably fits
-      // below the trigger even on a shorter viewport, so it shouldn't flip
-      // upward just because a much taller list wouldn't have fit.
       const rowCount = Math.max(1, Math.min(options.length, 6));
       const estimatedHeight = Math.min(
         POPOVER_MAX_HEIGHT,
