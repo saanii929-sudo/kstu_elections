@@ -84,11 +84,21 @@ export default function Select({
     function reposition() {
       if (!triggerRef.current) return;
       const rect = triggerRef.current.getBoundingClientRect();
+      // Estimate the popover's real height (search box + up to 6 visible
+      // rows before it scrolls internally) instead of assuming a flat
+      // worst-case max — a short list (e.g. 2 options) comfortably fits
+      // below the trigger even on a shorter viewport, so it shouldn't flip
+      // upward just because a much taller list wouldn't have fit.
+      const rowCount = Math.max(1, Math.min(options.length, 6));
+      const estimatedHeight = Math.min(
+        POPOVER_MAX_HEIGHT,
+        (showSearch ? 52 : 8) + rowCount * 36 + 16,
+      );
       const spaceBelow = window.innerHeight - rect.bottom;
       const spaceAbove = rect.top;
-      const openUpward = spaceBelow < POPOVER_MAX_HEIGHT && spaceAbove > spaceBelow;
+      const openUpward = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
       setCoords({
-        top: openUpward ? Math.max(8, rect.top - Math.min(POPOVER_MAX_HEIGHT, spaceAbove - 12) - 8) : rect.bottom + 6,
+        top: openUpward ? Math.max(8, rect.top - Math.min(estimatedHeight, spaceAbove - 12) - 8) : rect.bottom + 6,
         left: rect.left,
         width: rect.width,
       });

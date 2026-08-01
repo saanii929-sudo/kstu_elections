@@ -180,6 +180,26 @@ export default function VotersPage() {
   const [bulkStep, setBulkStep] = useState(1);
   const [schedulingBulk, setSchedulingBulk] = useState(false);
   const [bulkScheduled, setBulkScheduled] = useState(false);
+  // "Import from Election" — an alternate source for the same store-then-
+  // schedule flow above: instead of parsing a CSV, the rows come from an
+  // existing election's roster, filtered by department/faculty/level/gender.
+  const [bulkSourceMode, setBulkSourceMode] = useState<"csv" | "import">("csv");
+  const [importSourceElectionId, setImportSourceElectionId] = useState("");
+  const [importFilterOptions, setImportFilterOptions] = useState<{
+    departments: string[];
+    faculties: string[];
+    levels: string[];
+    genders: string[];
+  }>({ departments: [], faculties: [], levels: [], genders: [] });
+  const [importFilters, setImportFilters] = useState({
+    department: "",
+    faculty: "",
+    level: "",
+    gender: "",
+  });
+  const [importPreviewCount, setImportPreviewCount] = useState<number | null>(null);
+  const [importPreviewLoading, setImportPreviewLoading] = useState(false);
+  const [importingVoters, setImportingVoters] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [rescheduleSendAt, setRescheduleSendAt] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
@@ -225,6 +245,9 @@ export default function VotersPage() {
     voterId: "",
     department: "",
     class: "",
+    faculty: "",
+    level: "",
+    gender: "",
   });
 
   useEffect(() => {
@@ -337,6 +360,9 @@ export default function VotersPage() {
         metadata: {
           department: formData.department,
           class: formData.class,
+          faculty: formData.faculty,
+          level: formData.level,
+          gender: formData.gender,
         },
       };
       if (!editingVoter) {
@@ -396,6 +422,9 @@ export default function VotersPage() {
       voterId: voter.voterId || "",
       department: (voter as any).metadata?.department || "",
       class: (voter as any).metadata?.class || "",
+      faculty: (voter as any).metadata?.faculty || "",
+      level: (voter as any).metadata?.level || "",
+      gender: (voter as any).metadata?.gender || "",
     });
     setShowAddModal(true);
   };
@@ -604,6 +633,92 @@ export default function VotersPage() {
     }
   };
 
+  // Fetches how many voters in the chosen source election currently match
+  // the given filters, plus the full set of filter values available there —
+  // called on source-election change and on every filter change.
+  const fetchImportPreview = async (
+    electionId: string,
+    filters: typeof importFilters,
+  ) => {
+    if (!electionId) {
+      setImportPreviewCount(null);
+      return;
+    }
+    setImportPreviewLoading(true);
+    try {
+      const params = new URLSearchParams({ sourceElectionId: electionId });
+      if (filters.department) params.set("department", filters.department);
+      if (filters.faculty) params.set("faculty", filters.faculty);
+      if (filters.level) params.set("level", filters.level);
+      if (filters.gender) params.set("gender", filters.gender);
+      const response = await authFetch(`/api/elections/voters/import?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setImportPreviewCount(data.data.count);
+        setImportFilterOptions(data.data.filterOptions);
+      }
+    } catch (error) {
+      console.error("Failed to load import preview:", error);
+    } finally {
+      setImportPreviewLoading(false);
+    }
+  };
+
+  const handleImportSourceChange = (electionId: string) => {
+    setImportSourceElectionId(electionId);
+    const cleared = { department: "", faculty: "", level: "", gender: "" };
+    setImportFilters(cleared);
+    setImportPreviewCount(null);
+    if (electionId) fetchImportPreview(electionId, cleared);
+  };
+
+  const handleImportFilterChange = (
+    key: keyof typeof importFilters,
+    value: string,
+  ) => {
+    const next = { ...importFilters, [key]: value };
+    setImportFilters(next);
+    fetchImportPreview(importSourceElectionId, next);
+  };
+
+  // Same store-then-schedule flow as handleBulkUpload — the response shape
+  // matches exactly, so it plugs straight into the existing review/schedule
+  // steps below regardless of which source produced it.
+  const handleImportVoters = async () => {
+    if (!importSourceElectionId || !selectedElection) return;
+
+    setImportingVoters(true);
+    try {
+      const response = await authFetch("/api/elections/voters/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetElectionId: selectedElection,
+          sourceElectionId: importSourceElectionId,
+          filters: importFilters,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        toast.success(
+          data.message || `Successfully imported ${data.data.successful} voters!`,
+        );
+        setUploadResults(data.data);
+        setBulkStep(1);
+        fetchVoters();
+      } else {
+        toast.error(data.error || "Failed to import voters");
+      }
+    } catch (error) {
+      console.error("Import voters error:", error);
+      toast.error("Failed to import voters");
+    } finally {
+      setImportingVoters(false);
+    }
+  };
+
   // Step 2: schedule credential delivery for just this batch (everything
   // stored in step 1 that hasn't already been sent).
   const confirmBulkSchedule = async () => {
@@ -716,10 +831,14 @@ export default function VotersPage() {
   };
 
   const downloadTemplate = () => {
-    const csv = `name,email,phone,voterId,department,class
-"John Doe","john@example.com","233552732025","STU001","Computer Science","2023"
-"Jane Smith","jane@example.com","233244123456","STU002","Engineering","2024"
-"Bob Johnson","bob@example.com","0553732025","STU003","Business","2023"`;
+    // faculty, level, and gender are optional — leave them blank if you
+    // don't need them. Filling them in lets this election's roster be
+    // filtered and re-used later for a related departmental/faculty
+    // election via "Import from Election" instead of re-uploading a CSV.
+    const csv = `name,email,phone,voterId,department,class,faculty,level,gender
+"John Doe","john@example.com","233552732025","STU001","Computer Science","2023","Engineering","200","Male"
+"Jane Smith","jane@example.com","233244123456","STU002","Engineering","2024","Engineering","300","Female"
+"Bob Johnson","bob@example.com","0553732025","STU003","Business","2023","Business","100",""`;
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = window.URL.createObjectURL(blob);
@@ -738,6 +857,9 @@ export default function VotersPage() {
       voterId: "",
       department: "",
       class: "",
+      faculty: "",
+      level: "",
+      gender: "",
     });
   };
 
@@ -876,6 +998,10 @@ export default function VotersPage() {
                   setBulkScheduledSendAt("");
                   setBulkStep(1);
                   setBulkScheduled(false);
+                  setBulkSourceMode("csv");
+                  setImportSourceElectionId("");
+                  setImportFilters({ department: "", faculty: "", level: "", gender: "" });
+                  setImportPreviewCount(null);
                   setShowBulkModal(true);
                 }}
                 disabled={isElectionEnded()}
@@ -1331,7 +1457,7 @@ export default function VotersPage() {
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between bg-[#d4af37] items-center p-4 border-b border-gray-200 rounded-t-lg">
+            <div className="flex justify-between bg-[#1C2338] items-center p-4 border-b border-gray-200 rounded-t-lg">
               <h2 className="text-2xl font-bold text-white">
                 {editingVoter ? "Edit Voter" : "Add Voter"}
               </h2>
@@ -1429,6 +1555,48 @@ export default function VotersPage() {
                             setFormData({ ...formData, class: e.target.value })
                           }
                           className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Faculty
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.faculty}
+                          onChange={(e) =>
+                            setFormData({ ...formData, faculty: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Level
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.level}
+                          onChange={(e) =>
+                            setFormData({ ...formData, level: e.target.value })
+                          }
+                          placeholder="e.g. 100, 200, HND1"
+                          className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Gender
+                        </label>
+                        <Select
+                          value={formData.gender}
+                          onChange={(v) => setFormData({ ...formData, gender: v })}
+                          placeholder="Not specified"
+                          searchable={false}
+                          options={[
+                            { value: "Male", label: "Male" },
+                            { value: "Female", label: "Female" },
+                          ]}
                         />
                       </div>
                     </div>
@@ -1598,15 +1766,10 @@ export default function VotersPage() {
       {showBulkModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="bg-[#d4af37] text-white px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between rounded-t-lg">
+            <div className="bg-[#1C2338] text-white px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between rounded-t-lg">
               <h3 className="text-lg font-semibold">Bulk Upload Voters</h3>
             </div>
             <div className="p-6">
-              {selectedElectionData && (
-                <div className="mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                  Uploading to: <strong>{selectedElectionData.title}</strong>
-                </div>
-              )}
 
               {/* ── Done (uploaded AND scheduled) ── */}
               {bulkScheduled ? (
@@ -1975,42 +2138,170 @@ export default function VotersPage() {
                   </div>
                 </div>
               ) : (
-                /* ── File picker (nothing chosen yet) ── */
+                /* ── Source picker (nothing chosen yet) ── */
                 <div className="space-y-6">
-                  <div>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Upload a CSV file with voter information. The file should
-                      have the following columns:
-                    </p>
-
+                  {/* Mode tabs */}
+                  <div className="flex items-center bg-gray-100 rounded-lg p-1 w-fit">
                     <button
-                      onClick={downloadTemplate}
-                      className="text-sm text-[#d4af37] hover:text-[#d4af37] flex items-center gap-2 font-medium"
+                      type="button"
+                      onClick={() => setBulkSourceMode("csv")}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
+                        bulkSourceMode === "csv"
+                          ? "bg-white text-[#d4af37] shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
                     >
-                      <Download size={16} />
-                      Download CSV Template (with instructions)
+                      Upload CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBulkSourceMode("import")}
+                      className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
+                        bulkSourceMode === "import"
+                          ? "bg-white text-[#d4af37] shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      Import from Election
                     </button>
                   </div>
 
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                    <Upload className="mx-auto text-gray-400 mb-4" size={48} />
-                    <p className="text-gray-600 mb-4">
-                      Click to upload or drag and drop
-                    </p>
-                    <input
-                      type="file"
-                      accept=".csv"
-                      onChange={handleFileSelect}
-                      className="hidden"
-                      id="csv-upload"
-                    />
-                    <label
-                      htmlFor="csv-upload"
-                      className="inline-block px-6 py-3 bg-[#d4af37] text-white rounded-lg hover:bg-[#d4af37] cursor-pointer"
-                    >
-                      Choose CSV File
-                    </label>
-                  </div>
+                  {bulkSourceMode === "csv" ? (
+                    <>
+                      <div>
+                        <p className="text-sm text-gray-600 mb-4">
+                          Upload a CSV file with voter information. The file
+                          should have the following columns:
+                        </p>
+
+                        <button
+                          onClick={downloadTemplate}
+                          className="text-sm text-[#d4af37] hover:text-[#d4af37] flex items-center gap-2 font-medium"
+                        >
+                          <Download size={16} />
+                          Download CSV Template (with instructions)
+                        </button>
+                      </div>
+
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                        <Upload className="mx-auto text-gray-400 mb-4" size={48} />
+                        <p className="text-gray-600 mb-4">
+                          Click to upload or drag and drop
+                        </p>
+                        <input
+                          type="file"
+                          accept=".csv"
+                          onChange={handleFileSelect}
+                          className="hidden"
+                          id="csv-upload"
+                        />
+                        <label
+                          htmlFor="csv-upload"
+                          className="inline-block px-6 py-3 bg-[#d4af37] text-white rounded-lg hover:bg-[#d4af37] cursor-pointer"
+                        >
+                          Choose CSV File
+                        </label>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-600">
+                        Already uploaded a full roster for another election
+                        (e.g. a school-wide election)? Reuse it here — filter
+                        down to just the department, faculty, level, or
+                        gender you need instead of uploading a new file.
+                      </p>
+
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Source Election
+                        </label>
+                        <Select
+                          value={importSourceElectionId}
+                          onChange={handleImportSourceChange}
+                          placeholder="Select an election to import from…"
+                          options={elections
+                            .filter((e) => e._id !== selectedElection)
+                            .map((e) => ({ value: e._id, label: e.title }))}
+                        />
+                      </div>
+
+                      {importSourceElectionId && (
+                        <>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-sm font-medium mb-1">
+                                Department
+                              </label>
+                              <Select
+                                value={importFilters.department}
+                                onChange={(v) => handleImportFilterChange("department", v)}
+                                placeholder="All departments"
+                                options={importFilterOptions.departments.map((d) => ({
+                                  value: d,
+                                  label: d,
+                                }))}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium mb-1">
+                                Faculty
+                              </label>
+                              <Select
+                                value={importFilters.faculty}
+                                onChange={(v) => handleImportFilterChange("faculty", v)}
+                                placeholder="All faculties"
+                                options={importFilterOptions.faculties.map((f) => ({
+                                  value: f,
+                                  label: f,
+                                }))}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium mb-1">
+                                Level
+                              </label>
+                              <Select
+                                value={importFilters.level}
+                                onChange={(v) => handleImportFilterChange("level", v)}
+                                placeholder="All levels"
+                                searchable={false}
+                                options={importFilterOptions.levels.map((l) => ({
+                                  value: l,
+                                  label: l,
+                                }))}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium mb-1">
+                                Gender
+                              </label>
+                              <Select
+                                value={importFilters.gender}
+                                onChange={(v) => handleImportFilterChange("gender", v)}
+                                placeholder="All genders"
+                                searchable={false}
+                                options={importFilterOptions.genders.map((g) => ({
+                                  value: g,
+                                  label: g,
+                                }))}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                            {importPreviewLoading
+                              ? "Checking…"
+                              : importPreviewCount === null
+                                ? ""
+                                : importPreviewCount === 0
+                                  ? "No voters match these filters."
+                                  : `${importPreviewCount} voter(s) match these filters.`}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
 
                   <div className="flex gap-3 justify-end pt-2">
                     <button
@@ -2019,6 +2310,21 @@ export default function VotersPage() {
                     >
                       Close
                     </button>
+                    {bulkSourceMode === "import" && (
+                      <button
+                        onClick={handleImportVoters}
+                        disabled={
+                          importingVoters ||
+                          !importSourceElectionId ||
+                          !importPreviewCount
+                        }
+                        className="px-5 py-2 bg-[#d4af37] text-white font-medium rounded-lg hover:bg-[#c19d2f] disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {importingVoters
+                          ? "Importing…"
+                          : `Import ${importPreviewCount ?? 0} Voter${importPreviewCount === 1 ? "" : "s"}`}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

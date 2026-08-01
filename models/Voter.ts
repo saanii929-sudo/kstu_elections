@@ -22,6 +22,14 @@ export interface IVoter extends Document {
     department?: string;
     class?: string;
     studentId?: string;
+    // All optional — never required at upload/entry time. Populating them
+    // lets a school-wide election's roster be filtered and re-used (by
+    // department/faculty/level/gender) as the voter list for a related
+    // departmental/faculty election, instead of re-uploading the same
+    // students. See app/api/elections/voters/import/route.ts.
+    faculty?: string;
+    level?: string;
+    gender?: string;
     [key: string]: any;
   };
   createdAt: Date;
