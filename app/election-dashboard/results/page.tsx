@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Download,
   Users,
@@ -18,6 +18,7 @@ import {
 import toast from "react-hot-toast";
 import { getElectionStatus } from "@/lib/electionStatus";
 import { formatElectionDateTime } from "@/lib/formatDate";
+import Select from "@/components/Select";
 
 // Dynamic color palette for candidate differentiation
 const CANDIDATE_COLORS = [
@@ -38,8 +39,6 @@ interface Candidate {
   name: string;
   image?: string;
   voteCount: number;
-  // Only meaningful when this candidate is the sole one in their category —
-  // explicit rejections on the YES/NO referendum ballot.
   noVoteCount?: number;
   categoryId: { _id: string; name: string };
 }
@@ -52,20 +51,28 @@ interface Election {
   endDate: string;
 }
 
-function useCountdown(targetDate: string | null) {
+function useCountdown(targetDate: string | null, onComplete?: () => void) {
   const [timeLeft, setTimeLeft] = useState<{
     days: number;
     hours: number;
     minutes: number;
     seconds: number;
   } | null>(null);
+  const completedRef = useRef(false);
+  const cbRef = useRef(onComplete);
+  cbRef.current = onComplete;
 
   useEffect(() => {
     if (!targetDate) return;
+    completedRef.current = false;
     const tick = () => {
       const diff = new Date(targetDate).getTime() - Date.now();
       if (diff <= 0) {
         setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+        if (!completedRef.current) {
+          completedRef.current = true;
+          cbRef.current?.();
+        }
         return;
       }
       setTimeLeft({
@@ -155,6 +162,55 @@ function PieChart({
   );
 }
 
+function BarChart({
+  candidates,
+  colors,
+}: {
+  candidates: { name: string; voteCount: number }[];
+  colors: string[];
+}) {
+  const total = candidates.reduce((s, c) => s + c.voteCount, 0);
+  const max = Math.max(...candidates.map((c) => c.voteCount), 1);
+
+  if (total === 0) {
+    return (
+      <div className="flex items-center justify-center w-full h-44 rounded-xl border-2 border-dashed border-gray-200">
+        <span className="text-xs text-gray-400 text-center px-4">
+          No votes yet
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-3">
+      {candidates.map((c, i) => {
+        const pct = total > 0 ? (c.voteCount / total) * 100 : 0;
+        const widthPct = (c.voteCount / max) * 100;
+        return (
+          <div key={c.name}>
+            <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+              <span className="truncate">{c.name}</span>
+              <span className="font-semibold shrink-0 ml-2">
+                {pct.toFixed(1)}%
+              </span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-700"
+                style={{
+                  width: `${widthPct}%`,
+                  backgroundColor: colors[i % colors.length],
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -195,36 +251,33 @@ export default function ResultsPage() {
   const [electionsLoading, setElectionsLoading] = useState(true);
   const [selectedElection, setSelectedElection] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  // Counts only (not full voter documents) — the auto-refresh below polls
-  // this every 5s, and there's no need to transfer every voter's
-  // name/email/phone/credentials just to derive two numbers.
-  const [voterCounts, setVoterCounts] = useState({ totalVoters: 0, votedCount: 0 });
+  const [voterCounts, setVoterCounts] = useState({
+    totalVoters: 0,
+    votedCount: 0,
+  });
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+  const [chartType, setChartType] = useState<"pie" | "bar">("pie");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
   const currentElection =
     elections.find((e) => e._id === selectedElection) || null;
-  // Purely date-driven, same rule voting eligibility and the rest of the
-  // dashboard already use (see lib/electionStatus.ts) — status labels here
-  // never disagree with what voters can actually do.
   const electionStatusKey = currentElection
     ? getElectionStatus(currentElection)
     : null;
   const electionEnded = electionStatusKey === "closed";
   const electionActive = electionStatusKey === "live";
   const electionUpcoming = electionStatusKey === "scheduled";
-
-  // Counts down to whichever boundary is next — startDate while upcoming,
-  // endDate while live — not always endDate (which produced a confusing
-  // number, e.g. "opens in 45 days" while actually counting down to the
-  // election's end).
   const countdownTarget = currentElection
-    ? electionUpcoming ? currentElection.startDate : electionActive ? currentElection.endDate : null
+    ? electionUpcoming
+      ? currentElection.startDate
+      : electionActive
+        ? currentElection.endDate
+        : null
     : null;
-  const countdown = useCountdown(countdownTarget);
+  const countdown = useCountdown(countdownTarget, () => fetchElections());
   const pad = (n: number) => String(n).padStart(2, "0");
 
   useEffect(() => {
@@ -246,6 +299,12 @@ export default function ResultsPage() {
     }, 5000);
     return () => clearInterval(id);
   }, [selectedElection, autoRefresh]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const id = setInterval(() => fetchElections(), 20000);
+    return () => clearInterval(id);
+  }, [autoRefresh]);
 
   const fetchElections = async () => {
     try {
@@ -468,25 +527,38 @@ export default function ResultsPage() {
 
       {/* Election Selector */}
       <div className="flex flex-col md:flex-row md:items-start items-start gap-4 justify-between">
-        <div className="mb-6">
-          <label className="block text-lg font-medium text-gray-700 mb-1.5">
-            Election
-          </label>
-          <select
-            value={selectedElection}
-            onChange={(e) => setSelectedElection(e.target.value)}
-            disabled={electionsLoading}
-            className="w-full md:w-80 px-4 py-2.5 border border-gray-200 rounded-lg text-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37] bg-white disabled:bg-gray-50 disabled:text-gray-400"
-          >
-            <option value="">
-              {electionsLoading ? "Loading elections…" : "Select an election…"}
-            </option>
-            {elections.map((e) => (
-              <option key={e._id} value={e._id}>
-                {e.title}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-row gap-10">
+          <div className="mb-6">
+            <label className="block text-lg font-medium text-gray-700 mb-1.5">
+              Election
+            </label>
+            <div className="w-full md:w-80">
+              <Select
+                value={selectedElection}
+                onChange={setSelectedElection}
+                disabled={electionsLoading}
+                placeholder={electionsLoading ? "Loading elections…" : "Select an election…"}
+                options={elections.map((e) => ({ value: e._id, label: e.title }))}
+              />
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-lg font-medium text-gray-700 mb-1.5">
+              Graph Option
+            </label>
+            <div className="w-full md:w-48">
+              <Select
+                value={chartType}
+                onChange={(v) => setChartType(v as "pie" | "bar")}
+                searchable={false}
+                options={[
+                  { value: "pie", label: "Pie Chart" },
+                  { value: "bar", label: "Bar Chart" },
+                ]}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Election status */}
@@ -500,15 +572,7 @@ export default function ResultsPage() {
                   : "text-[#d4af37]"
             }`}
           >
-            <span
-              className={`w-2.5 h-2.5 text-center rounded-full ${
-                electionStatusKey === "closed"
-                  ? "bg-red-500"
-                  : electionStatusKey === "live"
-                    ? "bg-blue-500 animate-pulse"
-                    : "bg-[#d4af37]"
-              }`}
-            />
+            
             {electionStatusKey === "closed"
               ? "Ended"
               : electionStatusKey === "live"
@@ -679,7 +743,10 @@ export default function ResultsPage() {
                         <div className="px-6 py-4 flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <h3 className="text-2xl font-bold text-black">
-                              {positionName}
+                              {positionName}{" "}
+                              <span className="">
+                                [{positionCandidates.length}]
+                              </span>
                             </h3>
                           </div>
                           <span className="text-lg bg-white/15 text-white px-3 py-1 rounded-full">
@@ -718,20 +785,20 @@ export default function ResultsPage() {
                                   </span>
                                 ) : electionEnded ? (
                                   decidedTotal === 0 ? (
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold bg-gray-200 text-gray-600">
+                                    <span className="inline-flex items-center px-4 py-0.5 rounded-full text-sm font-bold bg-gray-200 text-gray-600">
                                       No Votes Cast
                                     </span>
                                   ) : yesCount > noCount ? (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-lg font-bold bg-[#d4af37] text-white">
+                                    <span className="inline-flex items-center gap-1 px-4 py-0.5 rounded-full text-lg font-bold bg-green-500 text-white">
                                       <Award size={14} /> Elected
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-lg font-bold bg-red-100 text-red-700">
+                                    <span className="inline-flex items-center gap-1 px-4 py-0.5 rounded-full text-lg font-bold bg-red-100 text-red-700">
                                       <XCircle size={14} /> Rejected
                                     </span>
                                   )
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-lg font-bold bg-blue-100 text-blue-700">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-4 rounded-full text-lg font-bold bg-blue-100 text-blue-700">
                                     <CheckCircle size={14} /> Polling in
                                     Progress
                                   </span>
@@ -749,16 +816,16 @@ export default function ResultsPage() {
                           </div>
                           {/* Split bar */}
                           <div className="flex items-center justify-between text-lg font-bold mb-2">
-                            <span className="text-[#d4af37] text-xl">
+                            <span className="text-blue-600 text-xl">
                               Yes — {yesPct.toFixed(1)}%
                             </span>
                             <span className="text-red-500 text-xl">
                               No — {noPct.toFixed(1)}%
                             </span>
                           </div>
-                          <div className="flex h-12 w-xl rounded-2xl overflow-hidden mb-2 bg-gray-100">
+                          <div className="flex h-10 w-xl rounded-full overflow-hidden mb-2 bg-gray-100">
                             <div
-                              className="bg-[#d4af37] flex items-center justify-center transition-all duration-700"
+                              className="bg-blue-600 flex items-center justify-center transition-all duration-700"
                               style={{
                                 width: `${yesPct}%`,
                                 minWidth: yesPct > 0 ? "2px" : "0",
@@ -792,17 +859,17 @@ export default function ResultsPage() {
                           </p>
                           {/* Stat cards */}
                           <div className="grid grid-cols-2 gap-3">
-                            <div className="rounded-xl p-4 bg-green-50 border border-green-100">
+                            <div className="rounded-xl p-4 bg-blue-50 border border-blue-100">
                               <div className="flex items-center gap-2 mb-2">
-                                <div className="w-6 h-6 rounded-full bg-[#d4af37] shrink-0" />
-                                <p className="text-lg font-bold text-[#d4af37] uppercase tracking-wider">
+                                <div className="w-6 h-6 rounded-full bg-blue-500 shrink-0" />
+                                <p className="text-lg font-bold text-blue-500 uppercase tracking-wider">
                                   Yes
                                 </p>
                               </div>
-                              <p className="text-4xl font-extrabold text-gray-900 leading-none">
+                              <p className="text-4xl font-extrabold text-blue-500 leading-none">
                                 {yesCount.toLocaleString()}
                               </p>
-                              <p className="text-xl text-green-600 font-semibold mt-1">
+                              <p className="text-xl text-blue-500 font-semibold mt-1">
                                 {yesPct.toFixed(1)}% of votes cast
                               </p>
                             </div>
@@ -834,7 +901,10 @@ export default function ResultsPage() {
                       {/* Position header */}
                       <div className="px-6 py-4 flex items-center justify-between">
                         <h3 className="text-2xl font-bold text-black">
-                          {positionName}
+                          {positionName}{" "}
+                          <span className="">
+                            [{positionCandidates.length}]
+                          </span>
                         </h3>
                         <span className="text-lg bg-white/15 text-black px-3 py-1 rounded-full font-medium">
                           {posTotal.toLocaleString()} vote
@@ -900,14 +970,14 @@ export default function ResultsPage() {
                                       {candidate.name}
                                     </p>
                                     {isTiedCandidate && (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-lg font-bold shrink-0 bg-amber-100 text-amber-800">
+                                      <span className="inline-flex items-center gap-1 px-4 py-0.5 rounded-full text-lg font-bold shrink-0 bg-amber-100 text-amber-800">
                                         <AlertTriangle size={24} />
                                         Tied
                                       </span>
                                     )}
                                     {isWinner && (
                                       <span
-                                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-lg font-bold shrink-0 ${electionEnded ? "bg-[#d4af37] text-white" : "bg-green-100 text-[#d4af37]"}`}
+                                        className={`inline-flex items-center gap-1 px-4 py-0.5 rounded-full text-lg font-bold shrink-0 ${electionEnded ? "bg-[#d4af37] text-white" : "bg-green-100 text-[#d4af37]"}`}
                                       >
                                         <Award size={14} />
                                         {electionEnded ? "Elected" : "Leading"}
@@ -945,31 +1015,40 @@ export default function ResultsPage() {
                         </div>
 
                         <div className="flex flex-col items-center gap-4 lg:w-72 shrink-0">
-                          <PieChart
-                            candidates={positionCandidates}
-                            colors={CANDIDATE_COLORS}
-                          />
-                          <div className="w-full space-y-1.5">
-                            {positionCandidates.map((c, i) => (
-                              <div
-                                key={c._id}
-                                className="flex items-center gap-2 text-xs"
-                              >
-                                <div
-                                  className="w-2.5 h-2.5 rounded-sm shrink-0"
-                                  style={{
-                                    backgroundColor:
-                                      CANDIDATE_COLORS[
-                                        i % CANDIDATE_COLORS.length
-                                      ],
-                                  }}
-                                />
-                                <span className="text-gray-600 truncate">
-                                  {c.name}
-                                </span>
+                          {chartType === "pie" ? (
+                            <>
+                              <PieChart
+                                candidates={positionCandidates}
+                                colors={CANDIDATE_COLORS}
+                              />
+                              <div className="w-full space-y-1.5">
+                                {positionCandidates.map((c, i) => (
+                                  <div
+                                    key={c._id}
+                                    className="flex items-center gap-2 text-xs"
+                                  >
+                                    <div
+                                      className="w-2.5 h-2.5 rounded-sm shrink-0"
+                                      style={{
+                                        backgroundColor:
+                                          CANDIDATE_COLORS[
+                                            i % CANDIDATE_COLORS.length
+                                          ],
+                                      }}
+                                    />
+                                    <span className="text-gray-600 truncate">
+                                      {c.name}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
+                            </>
+                          ) : (
+                            <BarChart
+                              candidates={positionCandidates}
+                              colors={CANDIDATE_COLORS}
+                            />
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1008,7 +1087,10 @@ export default function ResultsPage() {
                         <div className="px-6 py-4 flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <h3 className="text-2xl font-bold text-black">
-                              {positionName}
+                              {positionName}{" "}
+                              <span >
+                                [{positionCandidates.length}]
+                              </span>
                             </h3>
                           </div>
                           <span className="text-lg bg-white/15 text-white px-3 py-1 rounded-full">
@@ -1037,7 +1119,7 @@ export default function ResultsPage() {
                             <tbody>
                               {/* Yes row */}
                               <tr
-                                className={`border-b border-gray-100 ${isSoloTied ? "bg-amber-50" : "bg-green-50"}`}
+                                className={`border-b border-gray-100 ${isSoloTied ? "bg-amber-50" : "bg-blue-50"}`}
                               >
                                 <td className="py-4 px-6">
                                   <div className="flex items-center gap-3">
@@ -1048,7 +1130,7 @@ export default function ResultsPage() {
                                         className="w-22 h-22 rounded-lg object-cover border-2 border-green-100 shadow-sm shrink-0"
                                       />
                                     ) : (
-                                      <div className="w-22 h-22 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+                                      <div className="w-22 h-22 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
                                         <User
                                           className="text-green-600"
                                           size={22}
@@ -1072,13 +1154,13 @@ export default function ResultsPage() {
                                 </td>
                                 <td className="py-4 px-6">
                                   <div className="flex items-center gap-2">
-                                    <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+                                    <div className="flex-1 bg-blue-500 rounded-full h-4 overflow-hidden">
                                       <div
-                                        className="h-full rounded-full bg-[#d4af37] transition-all duration-700"
+                                        className="h-full rounded-full bg-blue-500 transition-all duration-700"
                                         style={{ width: `${yesPct}%` }}
                                       />
                                     </div>
-                                    <span className="text-lg font-semibold text-[#d4af37] w-12 text-right">
+                                    <span className="text-lg font-semibold text-blue-500 w-12 text-right">
                                       {yesPct.toFixed(1)}%
                                     </span>
                                   </div>
@@ -1128,11 +1210,11 @@ export default function ResultsPage() {
                                   electionEnded &&
                                   decidedTotal > 0 &&
                                   noCount > yesCount ? (
-                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-lg font-bold bg-red-100 text-red-700">
+                                    <span className="inline-flex items-center gap-1 px-4 py-1 rounded-full text-md font-bold bg-red-100 text-red-700">
                                       <XCircle size={22} /> Rejected
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-lg font-medium bg-gray-100 text-gray-500">
+                                    <span className="inline-flex items-center px-4 py-1 rounded-full text-md font-medium bg-gray-100 text-gray-500">
                                       —
                                     </span>
                                   )}
@@ -1158,7 +1240,10 @@ export default function ResultsPage() {
                     >
                       <div className="px-6 py-4 flex items-center justify-between">
                         <h3 className="text-2xl font-bold text-black">
-                          {positionName}
+                          {positionName}{" "}
+                          <span >
+                            [{positionCandidates.length}]
+                          </span>
                         </h3>
                         <span className="text-sm bg-white/15 text-black px-3 py-1 rounded-full font-medium">
                           {posTotal.toLocaleString()} vote

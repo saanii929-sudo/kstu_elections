@@ -285,7 +285,12 @@ function VotingPageContent() {
                         {currentStep + 1}
                       </div>
                       <div>
-                        <h2 className="text-2xl font-bold">{category.name}</h2>
+                        <h2 className="text-2xl font-bold">
+                          {category.name}{" "}
+                          <span className="">
+                            [{categoryCandidates.length}]
+                          </span>
+                        </h2>
                       </div>
                     </div>
                   </div>
@@ -347,7 +352,7 @@ function VotingPageContent() {
                                       <img
                                         src={candidate.image}
                                         alt={candidate.name}
-                                        className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-[3/4] rounded-xl object-cover object-top border-4 transition-all ${
+                                        className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-3/4 rounded-xl object-cover object-top border-4 transition-all ${
                                           isSelected
                                             ? "border-[#d4af37] shadow-xl"
                                             : "border-gray-200 group-hover:border-[#d4af37]"
@@ -355,7 +360,7 @@ function VotingPageContent() {
                                       />
                                     ) : (
                                       <div
-                                        className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-[3/4] rounded-xl flex items-center justify-center border-4 transition-all ${
+                                        className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-3/4 rounded-xl flex items-center justify-center border-4 transition-all ${
                                           isSelected
                                             ? "bg-[#d4af37] border-[#d4af37] shadow-xl"
                                             : "bg-green-100 border-gray-200 group-hover:border-[#d4af37]"
@@ -487,7 +492,7 @@ function VotingPageContent() {
                                     <img
                                       src={candidate.image}
                                       alt={candidate.name}
-                                      className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-[3/4] rounded-xl object-cover object-top border-4 transition-all ${
+                                      className={`w-full max-w-56 sm:max-w-64 mx-auto aspect-3/4 rounded-xl object-cover object-top border-4 transition-all ${
                                         isSelected
                                           ? "border-[#d4af37] shadow-xl"
                                           : "border-gray-200 group-hover:border-[#d4af37]"

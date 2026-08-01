@@ -27,6 +27,7 @@ import {
 import toast from "react-hot-toast";
 import ConfirmModal from "@/components/ConfirmModal";
 import ElectionStatusBadge from "@/components/ElectionStatusBadge";
+import Select from "@/components/Select";
 import { authFetch } from "@/lib/authFetch";
 import {
   getElectionStatus,
@@ -60,9 +61,9 @@ interface Election {
 }
 
 const APPROVAL_BADGE: Record<string, string> = {
-  pending: "bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  approved: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  rejected: "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400",
+  pending: "bg-amber-50  text-amber-700 ",
+  approved: "bg-emerald-50  text-emerald-700 ",
+  rejected: "bg-red-50  text-red-600 ",
 };
 
 const APPROVAL_LABEL: Record<string, string> = {
@@ -108,12 +109,7 @@ function formatTime(date: string) {
 export default function ElectionsPage() {
   const [elections, setElections] = useState<Election[]>([]);
   const [loading, setLoading] = useState(true);
-  // Election admins manage the elections assigned to them but don't create
-  // new ones — only superadmin does that.
   const [isElectionAdmin, setIsElectionAdmin] = useState(false);
-  // Only true until the very first fetch resolves — drives the full-page
-  // skeleton. Subsequent refetches (search/filter/sort/page changes) use
-  // `loading` alone so the toolbar (and the focused search input) never unmounts.
   const [initialLoading, setInitialLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingElection, setEditingElection] = useState<Election | null>(null);
@@ -122,8 +118,6 @@ export default function ElectionsPage() {
     alias: "",
     startDate: "",
     endDate: "",
-    // Only meaningful for an electionAdmin creating a new election —
-    // an organization owner's own id is used server-side instead.
     organizationId: "",
     showLiveResults: true,
     allowRevote: false,
@@ -142,7 +136,7 @@ export default function ElectionsPage() {
   const [dateTo, setDateTo] = useState("");
   const [sortBy, setSortBy] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [resultCount, setResultCount] = useState(0);
@@ -177,10 +171,6 @@ export default function ElectionsPage() {
     fetchStats();
   }, []);
 
-  // Superadmin approve/reject/reset-votes actions land in the DB
-  // immediately but this page had no way to notice — poll so those become
-  // visible without a manual reload (matches the pattern already used on
-  // the Results page).
   useEffect(() => {
     const id = setInterval(() => {
       fetchElections();
@@ -282,10 +272,6 @@ export default function ElectionsPage() {
       });
       if (response.ok) {
         const data = await response.json();
-        // A freshly-created election isn't in this session's token yet
-        // (electionAdmin access is scoped by the token, not a DB lookup) —
-        // swap in the new token so the rest of the session can manage it
-        // immediately, without logging out and back in.
         if (data.token) {
           localStorage.setItem("token", data.token);
           const userData = localStorage.getItem("user");
@@ -413,9 +399,6 @@ export default function ElectionsPage() {
   const scheduledCount = statsElections.filter((e) => getElectionStatus(e) === "scheduled").length;
   const closedCount = statsElections.filter((e) => getElectionStatus(e) === "closed").length;
 
-  // For an electionAdmin, the organizations they can create a new election
-  // under — derived from the elections already assigned to them (the API
-  // enforces this same restriction server-side; this is just for the picker).
   const availableOrgs = (() => {
     const map = new Map<string, string>();
     for (const e of statsElections) {
@@ -431,17 +414,17 @@ export default function ElectionsPage() {
         {/* Header skeleton */}
         <div className="mb-8 flex items-start justify-between">
           <div className="space-y-2">
-            <div className="h-8 w-40 rounded-lg bg-gray-200 dark:bg-gray-800 animate-pulse" />
-            <div className="h-4 w-64 rounded bg-gray-100 dark:bg-gray-800 animate-pulse" />
+            <div className="h-8 w-40 rounded-lg bg-gray-200  animate-pulse" />
+            <div className="h-4 w-64 rounded bg-gray-100  animate-pulse" />
           </div>
-          <div className="h-10 w-36 rounded-lg bg-gray-200 dark:bg-gray-800 animate-pulse" />
+          <div className="h-10 w-36 rounded-lg bg-gray-200  animate-pulse" />
         </div>
         {/* Skeleton cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3].map((i) => (
             <div
               key={i}
-              className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden animate-pulse"
+              className="bg-white  rounded-2xl border border-gray-100 shadow-sm overflow-hidden animate-pulse"
             >
               <div className="h-2 bg-gray-200" />
               <div className="p-5 space-y-3">
@@ -476,25 +459,25 @@ export default function ElectionsPage() {
         {/* Page Header */}
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-50 tracking-tight">Elections</h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-1 text-lg font-semibold">
+            <h1 className="text-4xl font-bold text-gray-900  tracking-tight">Elections</h1>
+            <p className="text-gray-500  mt-1 text-lg font-semibold">
               Manage, monitor, and configure all your elections in one place.
             </p>
             {/* Stats pills */}
             <div className="flex flex-wrap items-center gap-2 mt-3">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 text-lg font-medium">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-100 text-gray-600   text-lg font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
                 Total: {totalCount}
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 text-lg font-medium">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700   text-lg font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
                 Live: {liveCount}
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 text-lg font-medium">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700   text-lg font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
                 Scheduled: {scheduledCount}
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 text-lg font-medium">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 text-red-600   text-lg font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />
                 Closed: {closedCount}
               </span>
@@ -511,7 +494,7 @@ export default function ElectionsPage() {
                 setEditingElection(null);
                 setShowModal(true);
               }}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#D4AF37] text-white text-lg font-semibold rounded-xl hover:bg-[#d4af37] transition-colors shadow-sm whitespace-nowrap"
+              className="inline-flex cursor-pointer items-center gap-2 px-5 py-2.5 bg-[#D4AF37] text-white text-lg font-semibold rounded-xl hover:bg-[#d4af37] transition-colors shadow-sm whitespace-nowrap"
             >
               <Plus size={18} />
               New Election
@@ -529,16 +512,16 @@ export default function ElectionsPage() {
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Search by title or alias..."
-                className="w-full pl-9 pr-4 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none placeholder:text-gray-400 dark:placeholder:text-gray-600 transition"
+                className="w-full pl-9 pr-4 py-2.5 border border-gray-200 text-sm bg-white shadow-sm rounded-xl focus:ring-1 focus:ring-[#D4AF37] outline-none placeholder:text-gray-400  transition"
               />
             </div>
 
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border transition-colors whitespace-nowrap ${
+              className={`inline-flex cursor-pointer items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border transition-colors whitespace-nowrap ${
                 showFilters || statusFilter !== "all" || dateFrom || dateTo
-                  ? "bg-green-50 border-green-100 dark:border-emerald-500/20 text-[#D4AF37] dark:text-emerald-400"
-                  : "bg-white  border-gray-200 dark:border-gray-700 text-gray-600 "
+                  ? "bg-green-50 border-gray-100  shadow-md  text-[#D4AF37]"
+                  : "bg-white  border-gray-200 shadow-md text-gray-600 "
               }`}
             >
               <SlidersHorizontal size={16} />
@@ -546,40 +529,28 @@ export default function ElectionsPage() {
             </button>
 
             <div className="flex items-center gap-1.5">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortField)}
-                className="px-3 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-[#D4AF37] outline-none"
-              >
-                {SORT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>Sort: {opt.label}</option>
-                ))}
-              </select>
+              <div className="w-44">
+                <Select
+                  value={sortBy}
+                  onChange={(v) => setSortBy(v as SortField)}
+                  searchable={false}
+                  options={SORT_OPTIONS.map((opt) => ({ value: opt.value, label: `Sort: ${opt.label}` }))}
+                />
+              </div>
               <button
                 onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}
                 title={sortDir === "asc" ? "Ascending" : "Descending"}
-                className="p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="p-2.5 cursor-pointer rounded-xl border border-gray-200 shadow-md bg-white text-gray-500 hover:bg-gray-50  transition-colors"
               >
                 <ArrowUpDown size={16} className={sortDir === "asc" ? "rotate-180 transition-transform" : "transition-transform"} />
               </button>
             </div>
 
-            <div className="flex items-center rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shrink-0">
-              <button
-                onClick={() => setViewMode("grid")}
-                title="Grid view"
-                className={`p-2.5 transition-colors ${
-                  viewMode === "grid"
-                    ? "bg-[#D4AF37] text-white"
-                    : "bg-white text-gray-500  hover:bg-gray-50 "
-                }`}
-              >
-                <LayoutGrid size={16} />
-              </button>
+            <div className="flex items-center rounded-xl border border-gray-200 shadow-md overflow-hidden shrink-0">
               <button
                 onClick={() => setViewMode("table")}
                 title="Table view"
-                className={`p-2.5 transition-colors border-l border-gray-200 dark:border-gray-700 ${
+                className={`p-2.5 cursor-pointer transition-colors border-l border-gray-200  ${
                   viewMode === "table"
                     ? "bg-[#D4AF37] text-white"
                     : "bg-white  text-gray-500  hover:bg-gray-50 "
@@ -587,39 +558,49 @@ export default function ElectionsPage() {
               >
                 <Rows3 size={16} />
               </button>
+              <button
+                onClick={() => setViewMode("grid")}
+                title="Grid view"
+                className={`p-2.5 cursor-pointer transition-colors ${
+                  viewMode === "grid"
+                    ? "bg-[#D4AF37] text-white"
+                    : "bg-white text-gray-500  hover:bg-gray-50 "
+                }`}
+              >
+                <LayoutGrid size={16} />
+              </button>
             </div>
           </div>
 
           {showFilters && (
-            <div className="flex flex-wrap items-end gap-3 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl">
+            <div className="flex flex-wrap items-end gap-3 p-4 bg-gray-50  border border-gray-100 rounded-xl">
               <div>
-                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Status</label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                  className="px-3 py-2 text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-[#D4AF37] outline-none"
-                >
-                  {STATUS_FILTER_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                <label className="block text-xs font-semibold text-gray-500  mb-1">Status</label>
+                <div className="w-44">
+                  <Select
+                    value={statusFilter}
+                    onChange={(v) => setStatusFilter(v as StatusFilter)}
+                    searchable={false}
+                    options={STATUS_FILTER_OPTIONS}
+                  />
+                </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Starts After</label>
+                <label className="block text-xs font-semibold text-gray-500  mb-1">Starts After</label>
                 <input
                   type="date"
                   value={dateFrom}
                   onChange={(e) => setDateFrom(e.target.value)}
-                  className="px-3 py-2 text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-[#D4AF37] outline-none"
+                  className="px-3 py-2 text-sm text-gray-700 border-gray-200 shadow-md bg-white border  rounded-lg focus:ring-2 focus:ring-[#D4AF37] outline-none"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Starts Before</label>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Starts Before</label>
                 <input
                   type="date"
                   value={dateTo}
                   onChange={(e) => setDateTo(e.target.value)}
-                  className="px-3 py-2 text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-[#D4AF37] outline-none"
+                  className="px-3 py-2 text-sm text-gray-700  bg-white  border border-gray-200 shadow-md rounded-lg focus:ring-2 focus:ring-[#D4AF37] outline-none"
                 />
               </div>
               {(statusFilter !== "all" || dateFrom || dateTo || search) && (
@@ -630,7 +611,7 @@ export default function ElectionsPage() {
                     setDateTo("");
                     setSearchInput("");
                   }}
-                  className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                  className="px-3 py-2 text-sm font-medium text-gray-500  hover:text-gray-700  transition-colors"
                 >
                   Clear filters
                 </button>
@@ -642,14 +623,14 @@ export default function ElectionsPage() {
         <div className={loading ? "opacity-50 pointer-events-none transition-opacity" : "transition-opacity"}>
         {/* Empty State */}
         {elections.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 px-6 bg-white  rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-            <div className="w-24 h-24 bg-green-50 dark:bg-emerald-500/10 rounded-full flex items-center justify-center mb-5">
+          <div className="flex flex-col items-center justify-center py-24 px-6 bg-white  rounded-2xl border border-gray-100 shadow-sm">
+            <div className="w-24 h-24 bg-green-50  rounded-full flex items-center justify-center mb-5">
               <Calendar className="text-[#D4AF37]" size={38} />
             </div>
             {search || statusFilter !== "all" || dateFrom || dateTo ? (
               <>
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-50 mb-2">No matching elections</h3>
-                <p className="text-gray-500 dark:text-gray-400 text-lg font-semibold text-center max-w-xs mb-7">
+                <h3 className="text-2xl font-bold text-gray-900  mb-2">No matching elections</h3>
+                <p className="text-gray-500  text-lg font-semibold text-center max-w-xs mb-7">
                   Try adjusting your search term or filters.
                 </p>
                 <button
@@ -666,8 +647,8 @@ export default function ElectionsPage() {
               </>
             ) : (
               <>
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-50 mb-2">No elections yet</h3>
-                <p className="text-gray-500 dark:text-gray-400 text-lg font-semibold text-center max-w-xs mb-7">
+                <h3 className="text-2xl font-bold text-gray-900  mb-2">No elections yet</h3>
+                <p className="text-gray-500  text-lg font-semibold text-center max-w-xs mb-7">
                   You haven&apos;t created any elections. Start by setting up your first one — it only takes a minute.
                 </p>
                 <button
@@ -705,7 +686,7 @@ export default function ElectionsPage() {
               return (
                 <div
                   key={election._id}
-                  className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col"
+                  className="bg-white  rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col"
                 >
 
                   {/* Card body */}
@@ -713,11 +694,11 @@ export default function ElectionsPage() {
                     {/* Title + status badge */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 leading-snug line-clamp-2">
+                        <h3 className="text-lg font-bold text-gray-900  leading-snug line-clamp-2">
                           {election.title}
                         </h3>
                         {election.alias && (
-                          <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs font-mono font-semibold tracking-wide">
+                          <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-gray-50  text-gray-500  text-xs font-mono font-semibold tracking-wide">
                             {election.alias}
                           </span>
                         )}
@@ -742,23 +723,23 @@ export default function ElectionsPage() {
                     </div>
 
                     {/* Date range */}
-                    <div className="flex items-center gap-2 text-lg text-gray-400 dark:text-gray-500">
+                    <div className="flex items-center gap-2 text-lg text-gray-400 0">
                       <Calendar size={13} className="text-[#D4AF37] shrink-0" />
                       <span>
-                        {formatDate(election.startDate)} — {formatDate(election.endDate)}
+                        {formatDate(election.startDate)} -to- {formatDate(election.endDate)}
                       </span>
                     </div>
 
                     {/* Time range */}
-                    <div className="flex items-center gap-2 text-lg text-gray-400 dark:text-gray-500">
+                    <div className="flex items-center gap-2 text-lg text-gray-400 0">
                       <Clock3 size={13} className="text-[#D4AF37] shrink-0" />
                       <span>
-                        {formatTime(election.startDate)} — {formatTime(election.endDate)}
+                        {formatTime(election.startDate)} -to- {formatTime(election.endDate)}
                       </span>
                     </div>
 
                     {/* Counts */}
-                    <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 ">
                       <span className="inline-flex items-center gap-1.5">
                         <UserCheck size={14} className="text-[#D4AF37]" />
                         {election.candidateCount ?? 0} candidates
@@ -779,7 +760,7 @@ export default function ElectionsPage() {
                         {enabledChips.map((chip) => (
                           <span
                             key={chip.label}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 dark:bg-emerald-500/10 text-[#D4AF37] dark:text-emerald-400 text-sm font-medium border border-green-100 dark:border-emerald-500/20"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50  text-[#D4AF37]  text-sm font-medium border border-green-100 "
                           >
                             {chip.icon}
                             {chip.label}
@@ -790,10 +771,10 @@ export default function ElectionsPage() {
                   </div>
 
                   {/* Action row */}
-                  <div className="border-t border-gray-100 dark:border-gray-800 px-4 py-3 flex items-center gap-2">
+                  <div className="border-t border-gray-100 px-4 py-3 flex items-center gap-2">
                     <button
                       onClick={() => handleEdit(election)}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-green-50 dark:bg-emerald-500/10 text-[#D4AF37] dark:text-emerald-400 text-lg font-medium rounded-lg hover:bg-green-100 dark:hover:bg-emerald-500/20 transition-colors"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-green-50  text-[#D4AF37]  text-lg font-medium rounded-lg hover:bg-green-100  transition-colors"
                     >
                       <Edit size={14} />
                       Edit
@@ -801,7 +782,7 @@ export default function ElectionsPage() {
                     <button
                       onClick={() => handleUseAsTemplate(election)}
                       title="Use as template"
-                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-lg font-medium rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-gray-50  text-gray-500  text-lg font-medium rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
                     >
                       <LayoutTemplate size={14} />
                       <span className="hidden sm:inline text-sm">Template</span>
@@ -809,7 +790,7 @@ export default function ElectionsPage() {
                     <button
                       onClick={() => handleDelete(election._id)}
                       title="Delete election"
-                      className="inline-flex items-center justify-center px-3 py-2 bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"
+                      className="inline-flex items-center justify-center px-3 py-2 bg-red-50  text-red-500  rounded-lg hover:bg-red-100  transition-colors"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -823,14 +804,14 @@ export default function ElectionsPage() {
         {/* Pagination */}
         {elections.length > 0 && totalPages > 1 && (
           <div className="mt-6 flex items-center justify-between gap-4">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-gray-500 ">
               Page {page} of {totalPages} · {resultCount} result{resultCount === 1 ? "" : "s"}
             </p>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600  border border-gray-200  rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50  transition-colors"
               >
                 <ChevronLeft size={16} />
                 Prev
@@ -838,7 +819,7 @@ export default function ElectionsPage() {
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
-                className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-600  border border-gray-200  rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50  transition-colors"
               >
                 Next
                 <ChevronRight size={16} />
@@ -852,7 +833,7 @@ export default function ElectionsPage() {
       {/* Create / Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
+          <div className="bg-white  rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
             {/* Modal header */}
             <div className="bg-[#1c2338] px-6 py-4 rounded-t-2xl flex items-center justify-between shrink-0">
               <div>
@@ -886,31 +867,26 @@ export default function ElectionsPage() {
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
               {/* Election Details section */}
               <div className="space-y-4">
-                <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+                <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 0">
                   Election Details
                 </p>
 
                 {!editingElection && isElectionAdmin && availableOrgs.length > 1 && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label className="block text-sm font-medium text-gray-700  mb-1.5">
                       Organization <span className="text-red-400">*</span>
                     </label>
-                    <select
-                      required
+                    <Select
                       value={formData.organizationId}
-                      onChange={(e) => setFormData({ ...formData, organizationId: e.target.value })}
-                      className="w-full text-gray-900 dark:text-gray-100 bg-transparent dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none transition"
-                    >
-                      <option value="">Select an organization…</option>
-                      {availableOrgs.map((org) => (
-                        <option key={org.id} value={org.id}>{org.name}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => setFormData({ ...formData, organizationId: v })}
+                      placeholder="Select an organization…"
+                      options={availableOrgs.map((org) => ({ value: org.id, label: org.name }))}
+                    />
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-sm font-medium text-gray-700  mb-1.5">
                     Election Title <span className="text-red-400">*</span>
                   </label>
                   <input
@@ -921,12 +897,12 @@ export default function ElectionsPage() {
                       setFormData({ ...formData, title: e.target.value })
                     }
                     placeholder="e.g., Student Union Elections 2026"
-                    className="w-full text-gray-900 dark:text-gray-100 bg-transparent dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none placeholder:text-gray-300 dark:placeholder:text-gray-600 transition"
+                    className="w-full text-gray-900  bg-transparent  border border-gray-200  rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none placeholder:text-gray-300 dark:placeholder:text-gray-600 transition"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-sm font-medium text-gray-700  mb-1.5">
                     Election Alias <span className="text-red-400">*</span>
                   </label>
                   <input
@@ -939,18 +915,18 @@ export default function ElectionsPage() {
                     }}
                     placeholder="e.g., SRC2026"
                     maxLength={20}
-                    className={`w-full text-gray-900 dark:text-gray-100 bg-transparent dark:bg-gray-800 border rounded-xl px-4 py-2.5 text-sm font-mono tracking-wide focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none placeholder:text-gray-300 dark:placeholder:text-gray-600 transition ${
-                      aliasError ? "border-red-300 dark:border-red-500/50" : "border-gray-200 dark:border-gray-700"
+                    className={`w-full text-gray-900  bg-transparent  border rounded-xl px-4 py-2.5 text-sm font-mono tracking-wide focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none placeholder:text-gray-300 dark:placeholder:text-gray-600 transition ${
+                      aliasError ? "border-red-300 " : "border-gray-200 "
                     }`}
                   />
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                  <p className="text-xs text-gray-400 0 mt-1">
                     {aliasError || "A short, unique code used in search, SMS notifications, and reports."}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label className="block text-sm font-medium text-gray-700  mb-1.5">
                       Start Date & Time <span className="text-red-400">*</span>
                     </label>
                     <input
@@ -960,11 +936,11 @@ export default function ElectionsPage() {
                       onChange={(e) =>
                         setFormData({ ...formData, startDate: e.target.value })
                       }
-                      className="w-full text-gray-900 dark:text-gray-100 bg-transparent dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none transition"
+                      className="w-full text-gray-900  bg-transparent  border border-gray-200  rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none transition"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label className="block text-sm font-medium text-gray-700  mb-1.5">
                       End Date & Time <span className="text-red-400">*</span>
                     </label>
                     <input
@@ -974,7 +950,7 @@ export default function ElectionsPage() {
                       onChange={(e) =>
                         setFormData({ ...formData, endDate: e.target.value })
                       }
-                      className="w-full text-gray-900 dark:text-gray-100 bg-transparent dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none transition"
+                      className="w-full text-gray-900  bg-transparent  border border-gray-200  rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent outline-none transition"
                     />
                   </div>
                 </div>
@@ -982,19 +958,19 @@ export default function ElectionsPage() {
 
               {/* Voting Settings section */}
               <div className="space-y-4">
-                <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+                <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 0">
                   Voting Settings
                 </p>
 
                 {/* Show Live Results */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <div className="w-8 h-8 rounded-lg bg-green-50  flex items-center justify-center shrink-0 mt-0.5">
                       <Zap size={14} className="text-[#D4AF37]" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Show Live Results</p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      <p className="text-sm font-medium text-gray-800 ">Show Live Results</p>
+                      <p className="text-xs text-gray-400 0 mt-0.5">
                         Voters can see real-time results while voting is active.
                       </p>
                     </div>
@@ -1005,7 +981,7 @@ export default function ElectionsPage() {
                       setFormData({ ...formData, showLiveResults: !formData.showLiveResults })
                     }
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${
-                      formData.showLiveResults ? "bg-green-600" : "bg-gray-200 dark:bg-gray-700"
+                      formData.showLiveResults ? "bg-green-600" : "bg-gray-200 "
                     }`}
                   >
                     <span
@@ -1019,12 +995,12 @@ export default function ElectionsPage() {
                 {/* Allow Revote */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <div className="w-8 h-8 rounded-lg bg-green-50  flex items-center justify-center shrink-0 mt-0.5">
                       <RefreshCw size={14} className="text-[#D4AF37]" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Allow Revote</p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      <p className="text-sm font-medium text-gray-800 ">Allow Revote</p>
+                      <p className="text-xs text-gray-400 0 mt-0.5">
                         Voters can change their vote before the election closes.
                       </p>
                     </div>
@@ -1035,7 +1011,7 @@ export default function ElectionsPage() {
                       setFormData({ ...formData, allowRevote: !formData.allowRevote })
                     }
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${
-                      formData.allowRevote ? "bg-green-600" : "bg-gray-200 dark:bg-gray-700"
+                      formData.allowRevote ? "bg-green-600" : "bg-gray-200 "
                     }`}
                   >
                     <span
@@ -1049,12 +1025,12 @@ export default function ElectionsPage() {
                 {/* Require All Categories */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <div className="w-8 h-8 rounded-lg bg-green-50  flex items-center justify-center shrink-0 mt-0.5">
                       <CheckCircle2 size={14} className="text-[#D4AF37]" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Require All Categories</p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      <p className="text-sm font-medium text-gray-800 ">Require All Categories</p>
+                      <p className="text-xs text-gray-400 0 mt-0.5">
                         Voters must cast a vote in every category to submit.
                       </p>
                     </div>
@@ -1068,7 +1044,7 @@ export default function ElectionsPage() {
                       })
                     }
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${
-                      formData.requireAllCategories ? "bg-green-600" : "bg-gray-200 dark:bg-gray-700"
+                      formData.requireAllCategories ? "bg-green-600" : "bg-gray-200 "
                     }`}
                   >
                     <span
@@ -1082,12 +1058,12 @@ export default function ElectionsPage() {
                 {/* Require OTP */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <div className="w-8 h-8 rounded-lg bg-green-50  flex items-center justify-center shrink-0 mt-0.5">
                       <Shield size={14} className="text-[#D4AF37]" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Require OTP Verification</p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      <p className="text-sm font-medium text-gray-800 ">Require OTP Verification</p>
+                      <p className="text-xs text-gray-400 0 mt-0.5">
                         Voters must verify with a one-time code after logging in.
                       </p>
                     </div>
@@ -1098,7 +1074,7 @@ export default function ElectionsPage() {
                       setFormData({ ...formData, requireOTP: !formData.requireOTP })
                     }
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${
-                      formData.requireOTP ? "bg-green-600" : "bg-gray-200 dark:bg-gray-700"
+                      formData.requireOTP ? "bg-green-600" : "bg-gray-200 "
                     }`}
                   >
                     <span
@@ -1112,12 +1088,12 @@ export default function ElectionsPage() {
                 {/* Require Agent Signature */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <div className="w-8 h-8 rounded-lg bg-green-50  flex items-center justify-center shrink-0 mt-0.5">
                       <UserCheck size={14} className="text-[#D4AF37]" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Require Agent Signature</p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      <p className="text-sm font-medium text-gray-800 ">Require Agent Signature</p>
+                      <p className="text-xs text-gray-400 0 mt-0.5">
                         Only a candidate&apos;s assigned polling agent (password-verified) can sign for
                         them in Reports. When off, anyone can sign directly.
                       </p>
@@ -1129,7 +1105,7 @@ export default function ElectionsPage() {
                       setFormData({ ...formData, requireAgentSignature: !formData.requireAgentSignature })
                     }
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${
-                      formData.requireAgentSignature ? "bg-green-600" : "bg-gray-200 dark:bg-gray-700"
+                      formData.requireAgentSignature ? "bg-green-600" : "bg-gray-200 "
                     }`}
                   >
                     <span
@@ -1142,7 +1118,7 @@ export default function ElectionsPage() {
               </div>
 
               {/* Footer actions */}
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
                 <button
                   type="button"
                   onClick={() => {
@@ -1150,7 +1126,7 @@ export default function ElectionsPage() {
                     setEditingElection(null);
                     resetForm();
                   }}
-                  className="px-5 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  className="px-5 py-2.5 text-sm font-medium text-gray-600  border border-gray-200  rounded-xl hover:bg-gray-50  transition-colors"
                 >
                   Cancel
                 </button>
@@ -1191,28 +1167,28 @@ function ElectionsTable({
   onDelete: (electionId: string) => void;
 }) {
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
+    <div className="bg-white  rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
-            <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Election</th>
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</th>
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Dates</th>
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Time</th>
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-right">Candidates</th>
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-right">Voters</th>
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-right">Votes</th>
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-right">Actions</th>
+            <tr className="border-b border-gray-100 bg-gray-50">
+              <th className="px-4 py-6 text-xs font-semibold uppercase tracking-wide text-gray-500 ">Election</th>
+              <th className="px-4 py-6 text-xs font-semibold uppercase tracking-wide text-gray-500 ">Status</th>
+              <th className="px-4 py-6 text-xs font-semibold uppercase tracking-wide text-gray-500 ">Dates</th>
+              <th className="px-4 py-6 text-xs font-semibold uppercase tracking-wide text-gray-500 ">Time</th>
+              <th className="px-4 py-6 text-xs font-semibold uppercase tracking-wide text-gray-500  text-right">Candidates</th>
+              <th className="px-4 py-6 text-xs font-semibold uppercase tracking-wide text-gray-500  text-right">Voters</th>
+              <th className="px-4 py-6 text-xs font-semibold uppercase tracking-wide text-gray-500  text-right">Votes</th>
+              <th className="px-4 py-6 text-xs font-semibold uppercase tracking-wide text-gray-500  text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          <tbody className="divide-y divide-gray-100 ">
             {elections.map((election) => (
-              <tr key={election._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
-                <td className="px-4 py-3">
-                  <p className="font-bold text-gray-900 dark:text-gray-100 text-sm leading-snug">{election.title}</p>
+              <tr key={election._id} className="hover:bg-gray-50  transition-colors">
+                <td className="px-4 py-6">
+                  <p className="font-bold text-gray-900  text-sm leading-snug">{election.title}</p>
                   {election.alias && (
-                    <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs font-mono font-semibold tracking-wide">
+                    <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-gray-50  text-gray-500  text-xs font-mono font-semibold tracking-wide">
                       {election.alias}
                     </span>
                   )}
@@ -1236,19 +1212,19 @@ function ElectionsTable({
                 <td className="px-4 py-3">
                   <ElectionStatusBadge election={election} />
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                  {formatDate(election.startDate)} — {formatDate(election.endDate)}
+                <td className="px-4 py-3 text-sm text-gray-500  whitespace-nowrap">
+                  {formatDate(election.startDate)} -to- {formatDate(election.endDate)}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                  {formatTime(election.startDate)} — {formatTime(election.endDate)}
+                <td className="px-4 py-3 text-sm text-gray-500  whitespace-nowrap">
+                  {formatTime(election.startDate)} -to- {formatTime(election.endDate)}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 text-right tabular-nums">
+                <td className="px-4 py-3 text-sm text-gray-700  text-right tabular-nums">
                   {election.candidateCount ?? 0}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 text-right tabular-nums">
+                <td className="px-4 py-3 text-sm text-gray-700  text-right tabular-nums">
                   {election.voterCount ?? 0}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 text-right tabular-nums">
+                <td className="px-4 py-3 text-sm text-gray-700  text-right tabular-nums">
                   {election.totalVotes ?? 0}
                 </td>
                 <td className="px-4 py-3">
@@ -1256,21 +1232,21 @@ function ElectionsTable({
                     <button
                       onClick={() => onEdit(election)}
                       title="Edit election"
-                      className="p-2 rounded-lg bg-green-50 dark:bg-emerald-500/10 text-[#D4AF37] dark:text-emerald-400 hover:bg-green-100 dark:hover:bg-emerald-500/20 transition-colors"
+                      className="p-2 rounded-lg cursor-pointer bg-green-50  text-[#D4AF37]  hover:bg-green-100  transition-colors"
                     >
                       <Edit size={14} />
                     </button>
                     <button
                       onClick={() => onTemplate(election)}
                       title="Use as template"
-                      className="p-2 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      className="p-2 rounded-lg bg-gray-50  text-gray-500  hover:bg-gray-100 cursor-pointer transition-colors"
                     >
                       <LayoutTemplate size={14} />
                     </button>
                     <button
                       onClick={() => onDelete(election._id)}
                       title="Delete election"
-                      className="p-2 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"
+                      className="p-2 rounded-lg cursor-pointer bg-red-50  text-red-500  hover:bg-red-100  transition-colors"
                     >
                       <Trash2 size={14} />
                     </button>

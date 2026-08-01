@@ -23,6 +23,7 @@ import toast from "react-hot-toast";
 import { authFetch } from "@/lib/authFetch";
 import ConfirmModal from "@/components/ConfirmModal";
 import ElectionStatusBadge from "@/components/ElectionStatusBadge";
+import Select from "@/components/Select";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface Election {
@@ -884,15 +885,15 @@ export default function ReportsPage() {
       <div className="bg-white border border-gray-100 rounded-2xl shadow-sm px-5 py-4 mb-6 flex flex-col sm:flex-row sm:items-center gap-4">
         <div className="flex-1 min-w-0">
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Select Election</label>
-          <select
+          <Select
             value={selectedElection}
-            onChange={(e) => setSelectedElection(e.target.value)}
-            className="w-full text-sm font-medium text-gray-800 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#D4AF37] bg-gray-50"
-          >
-            {elections.map((e) => (
-              <option key={e._id} value={e._id}>{e.title}{e.alias ? ` — ${e.alias}` : ""}</option>
-            ))}
-          </select>
+            onChange={setSelectedElection}
+            placeholder="Select an election…"
+            options={elections.map((e) => ({
+              value: e._id,
+              label: `${e.title}${e.alias ? ` — ${e.alias}` : ""}`,
+            }))}
+          />
         </div>
         {currentElection && (
           <div className="flex items-center gap-3 text-sm text-gray-500 shrink-0">

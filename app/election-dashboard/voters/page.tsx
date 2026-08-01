@@ -21,6 +21,7 @@ import toast from "react-hot-toast";
 import AlertModal from "@/components/AlertModal";
 import ConfirmModal from "@/components/ConfirmModal";
 import DateTimePicker from "@/components/DateTimePicker";
+import Select from "@/components/Select";
 import { authFetch } from "@/lib/authFetch";
 
 interface Voter {
@@ -790,26 +791,18 @@ export default function VotersPage() {
       {/* Election Selector */}
       <label className="block text-sm font-medium mb-2">Select Election</label>
       <div className="mb-6 flex justify-between items-center lg:flex-row flex-col gap-4">
-        <div className="w-full md:w-1/2">
-          <select
+        <div className="w-full md:w-96">
+          <Select
             value={selectedElection}
-            onChange={(e) => {
-              setSelectedElection(e.target.value);
+            onChange={(v) => {
+              setSelectedElection(v);
               setVotersPage(1);
               setSearch("");
             }}
             disabled={electionsLoading}
-            className="w-full md:w-96 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37] disabled:bg-gray-50 disabled:text-gray-400"
-          >
-            <option value="">
-              {electionsLoading ? "Loading elections…" : "Select an election…"}
-            </option>
-            {elections.map((election) => (
-              <option key={election._id} value={election._id}>
-                {election.title}
-              </option>
-            ))}
-          </select>
+            placeholder={electionsLoading ? "Loading elections…" : "Select an election…"}
+            options={elections.map((election) => ({ value: election._id, label: election.title }))}
+          />
         </div>
         {selectedElection && (
           <div>
@@ -947,7 +940,7 @@ export default function VotersPage() {
                   setSearch(e.target.value);
                   setVotersPage(1);
                 }}
-                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
+                className="w-full pl-10 border-gray-200 shadow-md pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#d4af37]"
               />
             </div>
           </div>

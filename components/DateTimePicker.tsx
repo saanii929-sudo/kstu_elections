@@ -200,7 +200,7 @@ export default function DateTimePicker({
         <div
           ref={popoverRef}
           style={{ position: "fixed", top: coords.top, left: coords.left, width: POPOVER_WIDTH }}
-          className="z-[70] bg-white rounded-xl shadow-2xl border border-gray-100 p-4 max-h-[calc(100vh-24px)] overflow-y-auto"
+          className="z-70 bg-white rounded-xl shadow-2xl border border-gray-100 p-4 max-h-[calc(100vh-24px)] overflow-y-auto"
         >
           {/* Month nav */}
           <div className="flex items-center justify-between mb-3">
