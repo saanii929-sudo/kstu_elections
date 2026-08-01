@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search } from "lucide-react";
 
 export interface SelectOption {
@@ -37,6 +38,10 @@ export default function Select({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  // Portal target isn't available during SSR, and rendering into it before
+  // hydration would mismatch — flip on once mounted client-side.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const selected = options.find((o) => o.value === value) || null;
   const showSearch = searchable ?? true;
@@ -131,7 +136,7 @@ export default function Select({
         />
       </button>
 
-      {open && coords && (
+      {mounted && open && coords && createPortal(
         <div
           ref={popoverRef}
           style={{ position: "fixed", top: coords.top, left: coords.left, width: coords.width }}
@@ -175,7 +180,8 @@ export default function Select({
               })
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
