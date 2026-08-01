@@ -173,8 +173,7 @@ export default function NotFound() {
       </div>
       <div className="border-t border-gray-100 py-5 text-center">
         <p className="text-xs text-gray-400">
-          &copy; {new Date().getFullYear()} Pawavotes. All rights reserved.
-          Built for trust and transparency in Africa.
+          &copy; {new Date().getFullYear()} KsTU-Evote. All rights reserved.
         </p>
       </div>
     </div>

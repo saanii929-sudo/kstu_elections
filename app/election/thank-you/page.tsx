@@ -4,16 +4,12 @@ import Image from "next/image";
 import { CheckCircle2 } from "lucide-react";
 import { motion } from "framer-motion";
 
-// Deliberately self-contained — no auth, no localStorage read. By the time a
-// voter lands here, their session data has already been cleared, and anyone
-// else who reaches this URL directly just sees a generic thank-you, which is
-// harmless since it carries no voter-specific information.
 export default function ThankYouPage() {
   return (
     <section className="relative min-h-screen w-full">
       <Image
         src="/images/hero_image.jpeg"
-        alt="Pawavotes background"
+        alt="KsTU-Evote background"
         fill
         priority
         className="object-cover"

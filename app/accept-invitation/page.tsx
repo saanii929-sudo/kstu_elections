@@ -112,7 +112,7 @@ function AcceptInvitationContent() {
       {/* Background */}
       <Image
         src="/images/hero_image.jpg"
-        alt="Pawavotes background"
+        alt="KsTU-Evote background"
         fill
         priority
         className="object-cover"

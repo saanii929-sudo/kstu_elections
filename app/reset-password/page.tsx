@@ -125,7 +125,7 @@ function ResetPasswordContent() {
       >
         <Image
           src="/images/hero_image.jpg"
-          alt="Pawavotes background"
+          alt="KsTU-Evote background"
           fill
           priority
           className="object-cover"
@@ -151,7 +151,7 @@ function ResetPasswordContent() {
       >
         <Image
           src="/images/hero_image.jpg"
-          alt="Pawavotes background"
+          alt="KsTU-Evote background"
           fill
           priority
           className="object-cover"
@@ -222,7 +222,7 @@ function ResetPasswordContent() {
       >
         <Image
           src="/images/hero_image.jpg"
-          alt="Pawavotes background"
+          alt="KsTU-Evote background"
           fill
           priority
           className="object-cover"
@@ -250,9 +250,6 @@ function ResetPasswordContent() {
                 Electronic Voting System
               </h2>
             </div>
-            <p className="mb-8 text-center text-gray-600 text-sm">
-              Enter your new password below
-            </p>
 
             <form className="space-y-5" onSubmit={handleSubmit}>
               {/* New Password */}

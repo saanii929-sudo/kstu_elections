@@ -144,9 +144,9 @@ export default function HelpdeskPortalPage() {
                 )}
                 <button
                   onClick={handleLogout}
-                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition flex-shrink-0 text-sm"
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition shrink-0 text-sm"
                 >
-                  <LogOut size={16} className="sm:w-[18px] sm:h-[18px]" />
+                  <LogOut size={16} className="sm:w-4.5 sm:h-4.5" />
                   <span className="hidden sm:inline">Logout</span>
                   <span className="sm:hidden">Exit</span>
                 </button>
@@ -200,12 +200,12 @@ export default function HelpdeskPortalPage() {
                           )}
                         </div>
                         {voter.hasVoted ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium flex-shrink-0">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium shrink-0">
                             <CheckCircle size={12} />
                             Voted
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium flex-shrink-0">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium shrink-0">
                             <XCircle size={12} />
                             Not Voted
                           </span>
@@ -214,11 +214,11 @@ export default function HelpdeskPortalPage() {
 
                       <div className="space-y-1">
                         <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <Mail size={14} className="flex-shrink-0" />
+                          <Mail size={14} className="shrink-0" />
                           <span className="truncate">{voter.email}</span>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <Phone size={14} className="flex-shrink-0" />
+                          <Phone size={14} className="shrink-0" />
                           <span>{voter.phone}</span>
                         </div>
                       </div>

@@ -10,7 +10,7 @@ import { AUTH_EXPIRED_EVENT, isTokenExpired } from '@/lib/authFetch';
 
 
 const metadata = {
-  title: "PawaVotes Election Dashboard",
+  title: "KsTU-Evote Dashboard",
   description: "Manage your elections, candidates, and voters with ease.",
 };
 

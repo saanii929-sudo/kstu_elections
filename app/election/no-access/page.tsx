@@ -9,7 +9,7 @@ export default function NoAccessPage() {
     <section className="relative min-h-screen w-full">
       <Image
         src="/images/hero_image.jpeg"
-        alt="Pawavotes background"
+        alt="KsTU-Evote background"
         fill
         priority
         className="object-cover"

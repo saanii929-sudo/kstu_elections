@@ -18,7 +18,7 @@ import AdminTopBar from "@/components/AdminTopBar";
 
 
 const metadata = {
-  title: "PawaVotes SuperAdmin Dashboard",
+  title: "KsTU-Evote SuperAdmin Dashboard",
   description: "Manage organizations, service fees, and platform revenue.",
 };
 

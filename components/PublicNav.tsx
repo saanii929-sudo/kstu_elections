@@ -19,9 +19,9 @@ const PublicNav = () => {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/" className="flex relative items-center">
-            <Image src="/images/logo.png" alt="Pawavotes" width={70} height={70} />
+            <Image src="/images/logo.png" alt="KsTU-Evote" width={70} height={70} />
             <span className="text-xl absolute left-15 top-5 font-semibold text-green-600">
-              Pawavotes
+              KsTU-Evote
             </span>
           </Link>
 

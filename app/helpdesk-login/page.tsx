@@ -18,25 +18,25 @@ export default function HelpdeskLoginPage() {
 
   // Check if helpdesk user is already authenticated
   useEffect(() => {
-    const helpdeskToken = localStorage.getItem('helpdeskToken');
-    const helpdeskUser = localStorage.getItem('helpdeskUser');
-    const tokenTimestamp = localStorage.getItem('helpdeskTokenTimestamp');
-    
+    const helpdeskToken = localStorage.getItem("helpdeskToken");
+    const helpdeskUser = localStorage.getItem("helpdeskUser");
+    const tokenTimestamp = localStorage.getItem("helpdeskTokenTimestamp");
+
     if (helpdeskToken && helpdeskUser && tokenTimestamp) {
       const timestamp = parseInt(tokenTimestamp);
       const now = Date.now();
       const sixHours = 6 * 60 * 60 * 1000; // 6 hours in milliseconds
-      
+
       // Check if token is expired (older than 6 hours)
       if (now - timestamp > sixHours) {
         // Token expired, clear storage
-        localStorage.removeItem('helpdeskToken');
-        localStorage.removeItem('helpdeskUser');
-        localStorage.removeItem('helpdeskTokenTimestamp');
-        toast.error('Session expired. Please login again.');
+        localStorage.removeItem("helpdeskToken");
+        localStorage.removeItem("helpdeskUser");
+        localStorage.removeItem("helpdeskTokenTimestamp");
+        toast.error("Session expired. Please login again.");
       } else {
         // Token still valid, redirect
-        router.push('/helpdesk-portal');
+        router.push("/helpdesk-portal");
       }
     }
   }, [router]);
@@ -79,7 +79,7 @@ export default function HelpdeskLoginPage() {
         {/* Background */}
         <Image
           src="/images/hero_image.jpg"
-          alt="Pawavotes background"
+          alt="KsTU-Evote background"
           fill
           priority
           className="object-cover"
@@ -87,26 +87,20 @@ export default function HelpdeskLoginPage() {
         <div className="absolute inset-0 bg-black/70" />
         <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
           <div className="w-full relative max-w-md rounded-2xl bg-white/95 p-8 shadow-2xl backdrop-blur">
-            <div className="text-center mb-4">
-              {/* Logo */}
-              <div className="mb-8 py-6 flex justify-center items-center">
-                <Image
-                  src="/images/logo.png"
-                  alt="Pawavotes"
-                  width={70}
-                  height={70}
-                  className="absolute md:right-62 right-48"
-                />{" "}
-                <span className="text-xl font-semibold absolute md:right-40 right-25  text-green-600">
-                  Pawavotes
-                </span>
-              </div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                Help Desk Portal
+            <div className="flex-col mb-3 flex justify-center items-center">
+              <Image
+                src="/images/logo.png"
+                alt="KsTU E-Vote"
+                width={100}
+                height={100}
+              />
+              <h1 className="font-bold text-[#1C2338] text-lg">
+                Kumasi Technical University
               </h1>
-              <p className="text-gray-600">Sign in to assist voters</p>
+              <h2 className="font-bold text-[#D4AF37] text-sm">
+                Electronic Voting System
+              </h2>
             </div>
-
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
