@@ -68,6 +68,13 @@ export async function POST(
       );
     }
 
+    if (voter.status === 'expired') {
+      return NextResponse.json(
+        { error: 'Cannot resend credentials to a voter whose election has ended' },
+        { status: 400 }
+      );
+    }
+
     const plainPassword = voter.metadata?.plainPassword;
 
     if (!plainPassword) {

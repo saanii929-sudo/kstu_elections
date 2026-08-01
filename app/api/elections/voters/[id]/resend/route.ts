@@ -212,6 +212,13 @@ async function resendCredentials(
       );
     }
 
+    if (voter.status === 'expired') {
+      return NextResponse.json(
+        { error: 'Cannot resend credentials to a voter whose election has ended' },
+        { status: 400 }
+      );
+    }
+
     // Check if voter has email or phone
     if (!voter.email && !voter.phone) {
       return NextResponse.json(

@@ -516,8 +516,6 @@ export default function VotersPage() {
     }
   };
 
-  // Step 1: parse the CSV locally and show a preview — nothing is sent to
-  // the server yet, so a wrong file can be caught before it does any harm.
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -532,8 +530,6 @@ export default function VotersPage() {
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        // Excel typically ends lines with \r\n — strip the \r so it can't
-        // end up appended to whichever field is last on the line.
         const lines = text
           .split("\n")
           .map((line) => line.replace(/\r$/, ""))
@@ -544,9 +540,6 @@ export default function VotersPage() {
           return;
         }
 
-        // Header matching is case-insensitive, but the row keys sent to the
-        // bulk API must match its camelCase field names exactly (voterId,
-        // studentId) — lowercasing alone would silently drop those columns.
         const CANONICAL_FIELD_NAMES: Record<string, string> = {
           voterid: "voterId",
           studentid: "studentId",
@@ -593,10 +586,6 @@ export default function VotersPage() {
     setBulkStep(1);
   };
 
-  // Step 1: actually store the rows — this is what surfaces real duplicates
-  // (against existing voters and within the file itself) and other rows
-  // that couldn't be saved, so the admin reviews what's true in the
-  // database, not just a client-side guess. No schedule is required yet.
   const handleBulkUpload = async () => {
     if (!pendingBulkFile) return;
 
@@ -633,9 +622,6 @@ export default function VotersPage() {
     }
   };
 
-  // Fetches how many voters in the chosen source election currently match
-  // the given filters, plus the full set of filter values available there —
-  // called on source-election change and on every filter change.
   const fetchImportPreview = async (
     electionId: string,
     filters: typeof importFilters,
@@ -681,9 +667,6 @@ export default function VotersPage() {
     fetchImportPreview(importSourceElectionId, next);
   };
 
-  // Same store-then-schedule flow as handleBulkUpload — the response shape
-  // matches exactly, so it plugs straight into the existing review/schedule
-  // steps below regardless of which source produced it.
   const handleImportVoters = async () => {
     if (!importSourceElectionId || !selectedElection) return;
 
@@ -719,8 +702,6 @@ export default function VotersPage() {
     }
   };
 
-  // Step 2: schedule credential delivery for just this batch (everything
-  // stored in step 1 that hasn't already been sent).
   const confirmBulkSchedule = async () => {
     if (!uploadResults?.batchId || !bulkScheduledSendAt) return;
 
@@ -754,8 +735,6 @@ export default function VotersPage() {
     }
   };
 
-  // Undo: removes every voter from a just-completed upload, in case the
-  // mistake wasn't caught at the preview step.
   const undoBulkUpload = async () => {
     if (!uploadResults?.batchId || !selectedElection) return;
 
@@ -793,10 +772,6 @@ export default function VotersPage() {
     });
   };
 
-  // Wipes every voter registered for the currently selected election —
-  // including anyone who has already voted or whose status is expired.
-  // Their votes are deleted too, and this election's candidate vote counts
-  // are reset to zero to match.
   const handleDeleteAllVoters = () => {
     if (!selectedElection || electionTotalVoters === 0) return;
 
@@ -831,10 +806,6 @@ export default function VotersPage() {
   };
 
   const downloadTemplate = () => {
-    // faculty, level, and gender are optional — leave them blank if you
-    // don't need them. Filling them in lets this election's roster be
-    // filtered and re-used later for a related departmental/faculty
-    // election via "Import from Election" instead of re-uploading a CSV.
     const csv = `name,email,phone,voterId,department,class,faculty,level,gender
 "John Doe","john@example.com","233552732025","STU001","Computer Science","2023","Engineering","200","Male"
 "Jane Smith","jane@example.com","233244123456","STU002","Engineering","2024","Engineering","300","Female"
@@ -863,8 +834,6 @@ export default function VotersPage() {
     });
   };
 
-  // Server already applied search + pagination — `voters` is exactly what
-  // this page should render, no client-side re-filtering/slicing needed.
   const pagedVoters = voters;
   const votersTotalPages = votersPagination.totalPages;
   const currentVotersPage = votersPagination.page;
@@ -1123,15 +1092,18 @@ export default function VotersPage() {
                         className="p-2 text-[#1C2338] hover:bg-blue-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={
                           voter.hasVoted ||
+                          voter.status === "expired" ||
                           (!voter.email && !voter.phone) ||
                           resendingCredentials === voter._id
                         }
                         title={
                           voter.hasVoted
                             ? "Cannot resend to voter who has voted"
-                            : !voter.email && !voter.phone
-                              ? "No email or phone number"
-                              : "Resend credentials"
+                            : voter.status === "expired"
+                              ? "Election has ended — credentials no longer valid"
+                              : !voter.email && !voter.phone
+                                ? "No email or phone number"
+                                : "Resend credentials"
                         }
                       >
                         {resendingCredentials === voter._id ? (
@@ -1370,7 +1342,7 @@ export default function VotersPage() {
                               }
                               className="p-2 text-[#1C2338] hover:bg-blue-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                               disabled={
-                                voter.hasVoted ||
+                                voter.hasVoted || voter.status === "expired" ||
                                 (!voter.email && !voter.phone) ||
                                 resendingCredentials === voter._id
                               }
