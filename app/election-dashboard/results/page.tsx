@@ -20,7 +20,6 @@ import { getElectionStatus } from "@/lib/electionStatus";
 import { formatElectionDateTime } from "@/lib/formatDate";
 import Select from "@/components/Select";
 
-// Dynamic color palette for candidate differentiation
 const CANDIDATE_COLORS = [
   "#dc2626", // red
   "#2563eb", // blue
@@ -158,6 +157,29 @@ function PieChart({
         />
       ))}
       <circle cx={cx} cy={cy} r={r * 0.4} fill="white" />
+      {slices.map((slice, i) => {
+        const pct = ((slice.end - slice.start) / 360) * 100;
+        if (pct < 6) return null;
+        const mid = (slice.start + slice.end) / 2;
+        const pos = polar(cx, cy, r * 0.7, mid);
+        return (
+          <text
+            key={`label-${i}`}
+            x={pos.x}
+            y={pos.y}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize="12"
+            fontWeight="700"
+            fill="white"
+            stroke="rgba(0,0,0,0.35)"
+            strokeWidth="3"
+            paintOrder="stroke"
+          >
+            {pct.toFixed(0)}%
+          </text>
+        );
+      })}
     </svg>
   );
 }
@@ -236,7 +258,6 @@ function StatCard({
   );
 }
 
-// Returns tie info for a sorted (descending) candidate list
 function getTieStatus(candidates: { voteCount: number }[]) {
   if (candidates.length === 0)
     return { maxVotes: 0, isTied: false, tiedCount: 0 };
@@ -387,8 +408,6 @@ export default function ResultsPage() {
     const rows = [
       "Position,Rank,Candidate,Votes,Percentage,Status",
       ...Object.entries(groupedCandidates).flatMap(([pos, cs]) => {
-        // Solo (referendum-style) position — export real Yes/No counts
-        // rather than treating the sole candidate as an uncontested race.
         if (cs.length === 1) {
           const solo = cs[0];
           const yesCount = solo.voteCount;
@@ -991,19 +1010,21 @@ export default function ResultsPage() {
                                       </span>
                                     )}
                                   </div>
-                                  <div className="relative group/bar">
-                                    <div className="w-sm bg-gray-200 rounded-full h-10 overflow-hidden">
-                                      <div
-                                        className="h-full rounded-full transition-all duration-700"
-                                        style={{
-                                          width: `${pct}%`,
-                                          backgroundColor: color,
-                                        }}
-                                      />
+                                  <div className="flex h-10 w-sm rounded-full overflow-hidden bg-gray-100">
+                                    <div
+                                      className="flex items-center justify-center transition-all duration-700"
+                                      style={{
+                                        width: `${pct}%`,
+                                        minWidth: parseFloat(pct) > 0 ? "2px" : "0",
+                                        backgroundColor: color,
+                                      }}
+                                    >
+                                      {parseFloat(pct) >= 14 && (
+                                        <span className="text-white text-lg font-bold">
+                                          {pct}%
+                                        </span>
+                                      )}
                                     </div>
-                                    <span className="absolute -top-6 right-0 opacity-0 group-hover/bar:opacity-100 transition-opacity bg-gray-700 text-white text-xl font-bold px-1.5 py-0.5 rounded pointer-events-none whitespace-nowrap">
-                                      {pct}%
-                                    </span>
                                   </div>
                                 </div>
 
@@ -1029,25 +1050,34 @@ export default function ResultsPage() {
                                 colors={CANDIDATE_COLORS}
                               />
                               <div className="w-full space-y-1.5">
-                                {positionCandidates.map((c, i) => (
-                                  <div
-                                    key={c._id}
-                                    className="flex items-center gap-2 text-xs"
-                                  >
+                                {positionCandidates.map((c, i) => {
+                                  const legendPct =
+                                    posTotal > 0
+                                      ? ((c.voteCount / posTotal) * 100).toFixed(1)
+                                      : "0.0";
+                                  return (
                                     <div
-                                      className="w-2.5 h-2.5 rounded-sm shrink-0"
-                                      style={{
-                                        backgroundColor:
-                                          CANDIDATE_COLORS[
-                                            i % CANDIDATE_COLORS.length
-                                          ],
-                                      }}
-                                    />
-                                    <span className="text-gray-600 truncate">
-                                      {c.name}
-                                    </span>
-                                  </div>
-                                ))}
+                                      key={c._id}
+                                      className="flex items-center gap-2 text-xs"
+                                    >
+                                      <div
+                                        className="w-2.5 h-2.5 rounded-sm shrink-0"
+                                        style={{
+                                          backgroundColor:
+                                            CANDIDATE_COLORS[
+                                              i % CANDIDATE_COLORS.length
+                                            ],
+                                        }}
+                                      />
+                                      <span className="text-gray-600 truncate">
+                                        {c.name}
+                                      </span>
+                                      <span className="text-gray-400 font-semibold ml-auto shrink-0">
+                                        {legendPct}%
+                                      </span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </>
                           ) : (

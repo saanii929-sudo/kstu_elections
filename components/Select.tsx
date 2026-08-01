@@ -97,7 +97,14 @@ export default function Select({
     if (open) {
       reposition();
       window.addEventListener("resize", reposition);
-      const closeOnScroll = () => setOpen(false);
+      // Capture-phase "scroll" also fires for scrolling inside the popover's
+      // own option list (scroll events don't bubble, but capture still
+      // passes through every ancestor down to the target) — without this
+      // guard, trying to scroll the list instantly closed the dropdown.
+      const closeOnScroll = (e: Event) => {
+        if (popoverRef.current && popoverRef.current.contains(e.target as Node)) return;
+        setOpen(false);
+      };
       window.addEventListener("scroll", closeOnScroll, true);
       return () => {
         window.removeEventListener("resize", reposition);
