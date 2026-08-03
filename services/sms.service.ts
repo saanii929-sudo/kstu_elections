@@ -155,13 +155,23 @@ export async function sendVoterCredentialsSms(
 ): Promise<boolean> {
   const electionLabel = electionAlias;
 
-  // Short, single-message-segment format — every extra character here is
-  // extra SMS cost across an entire voter roll. "Password" (not "Token"):
-  // this system logs voters in with Student ID + password, not a token.
+  // Must stay a single GSM-7 SMS segment (<=160 chars) — anything longer
+  // gets split into concatenated parts, and if a carrier/handset fails to
+  // reassemble them (a real, observed failure mode), the voter loses
+  // whichever part didn't arrive. Since the link is the whole point of the
+  // message, previously it sat at the very end of a ~190-char, 2-segment
+  // message — a dropped second segment meant no link at all, only ID/
+  // password. Keep this short and keep the link near the front.
   const message = secureLink
-    ? `Hi, please use Student/Staff ID: ${studentId} and Password: ${password} for [${electionLabel}] with the link below. Thank You.
+    ? `ID: ${studentId} Pass: ${password} - ${electionLabel}
 ${secureLink}`
-    : `Hi, please use Student/Staff ID: ${studentId} and Password: ${password} for [${electionLabel}]. Contact your election administrator for your secure voting link. Thank You.`;
+    : `ID: ${studentId} Pass: ${password} - ${electionLabel}. Contact your election administrator for your secure voting link.`;
+
+  if (message.length > 160) {
+    console.warn(
+      `sendVoterCredentialsSms: message is ${message.length} chars, over the single-segment GSM-7 limit (160) — it will be split into multiple SMS parts, which risks losing the link if reassembly fails.`
+    );
+  }
 
   const result = await sendSms({
     to: phone,
